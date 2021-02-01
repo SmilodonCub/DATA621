@@ -1,0 +1,217 @@
+---
+title: 'A Modern Approach to Regression with `R`'
+subtitle: 'by Simon Sheather'
+author: 'notes by Bonnie Cooper'
+output:
+  rmdformats::downcute
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The following are notes from readings in ['A Modern Approach to Regression with `R`'](https://link.springer.com/book/10.1007/978-0-387-09608-7) by Simon Sheather for the course DATA621, 'Business Analystics and Data Mining' as part of the [Masters of Science in Data Science program at CUNY SPS](https://sps.cuny.edu/academics/graduate/master-science-data-science-ms).
+
+`R` libraries used:
+```{r message=FALSE}
+library( broom )
+library( dplyr )
+library( ggplot2 )
+library( gridExtra )
+library( tidyverse )
+library(gclus)
+```
+
+## Introduction
+building valid regression models for real-world data.  
+
+### Building Valid Models
+It makes sense to base inferences or conclusions only on valid models  
+Any conclusion is only as sound as the model on which it is based.  
+
+#### Motivating Examples
+
+**1) NFL Field Goals**
+```{r}
+nflfg_csv <- read.csv( 'FieldGoals2003to2006.csv' )
+nflfg_df <- data.frame( nflfg_csv )
+glimpse( nflfg_df )
+```
+```{r}
+head( nflfg_df )
+unique( nflfg_df$Yeart )
+unique( nflfg_df$Name )
+```
+the incorrect approach just looks at the correlation between feild goal percentages one year and the previous:
+```{r}
+nflfg_yeardif <- nflfg_df %>%
+  select( c( Name, Yeart, FGt ) ) %>%
+  pivot_wider( names_from = Yeart, values_from = FGt )
+nflfg_yeardif
+
+firstY <- nflfg_yeardif %>%
+  select( c( `2003`, `2004`, `2005` ) ) %>%
+  pivot_longer( cols = everything(), names_to = 'Year1', values_to = 'val1' )
+
+NextY <- nflfg_yeardif %>%
+  select( c( `2004`, `2005`, `2006` ) ) %>%
+  pivot_longer( cols = everything(), names_to = 'Year2', values_to = 'val2' )
+
+
+BothY <- cbind( firstY, NextY )
+
+ggplot( BothY, aes( x = val1, y = val2 ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 4 ) +
+  labs( title = 'Current by Previous Year' ) +
+  xlab( 'Field Goal Percentage in Year t-1' ) +
+  ylab( 'Field Goal Percentage in Year t' )
+
+```
+Overall, the correlation is very weak. However, this does not take into account the abilities of each of the athletes. another approach would be to fit a linear regression to each athlete's performance across the years.
+
+```{r}
+name_labs <- rep( nflfg_yeardif$Name, each = 3 )
+BothY$Names <- name_labs
+
+ggplot( BothY, aes( x = val1, y = val2, fill = Names ) ) +
+  geom_point( shape = 21, alpha = 0.5, size = 4 ) +
+  labs( title = 'Current by Previous Year' ) +
+  xlab( 'Field Goal Percentage in Year t-1' ) +
+  ylab( 'Field Goal Percentage in Year t' )
+```
+Now to look at the linear regression coefficients by athlete:
+
+```{r}
+by_athlete <- BothY %>%
+  group_by( Names )
+
+lm_byAthlete <- do( by_athlete, tidy( lm( val2 ~ val1, data = . ) ) )
+
+lm_byAthlete <- lm_byAthlete %>%
+  select( c( Names, term, estimate ) ) %>%
+  pivot_wider( names_from = term, values_from = estimate )
+
+
+lm_byAthlete
+```
+Allowing for a different intercept for each athlete (different abilities), it can be shown that if a kicker had a high field goal percentage the previous year, then they are predicted to have a lower goal percentage the current year.
+
+
+**2) Newspaper Circulation**
+demonstrate the use of dummy variables along with transformations to overcome skewness
+
+```{r}
+circ_url <- 'https://raw.githubusercontent.com/SmilodonCub/DATA621/master/circulation.csv'
+circ_df <- read.table( circ_url, sep = '\t', header = TRUE )
+circ_df <- rename( circ_df, Tabloid_hasComp = Tabloid.with.a.Serious.Competitor )
+glimpse( circ_df )
+```
+The feature `Tabloid.with.a.Serious.Competitor` is a **dummy variable** it only takes a true/false value to indicate an outcome.
+
+Take a look at Sunday ~ Weekday circulation grouped by the dummy variable: 
+```{r}
+ggplot( circ_df, aes( x = Weekday, y = Sunday, color = factor( Tabloid_hasComp ) ) ) +
+  geom_point( size = 3)
+```
+We can make the variable much more constant (linear) by plotting the log values:
+
+```{r}
+ggplot( circ_df, aes( x = log(Weekday), y = log(Sunday), color = factor( Tabloid_hasComp ) ) ) +
+  geom_point( size = 3)
+```
+
+
+**3) Menu Pricing in an NYC Restaurant**
+highlights the use of multiple regression. this is a classic dataset: pricing East/West of 5th Ave.  
+Produce a regression model to predict the price of dinner
+
+```{r}
+nyc_csv <- read.csv( 'nyc.csv' )
+nyc_df <- data.frame( nyc_csv )
+glimpse( nyc_df )
+```
+```{r}
+dta <- nyc_df %>%
+  select( c( Price, Food, Decor, Service ) )
+dta.r <- abs(cor(dta)) # get correlations
+dta.col <- dmat.color(dta.r) # get colors
+# reorder variables so those with highest correlation
+# are closest to the diagonal
+dta.o <- order.single(dta.r)
+cpairs(dta, dta.o, panel.colors=dta.col, gap=.5,
+main="Matrix plot of features" )
+  
+```
+
+check out the distributions of the East/West variable:
+```{r}
+ggplot( nyc_df, aes( x = factor( East ) , y = Price ) ) +
+  geom_boxplot() +
+  xlab( 'Direction off 5th Ave)' ) +
+  ggtitle( 'Price ~ East vs West' ) +
+  scale_x_discrete( labels = c( 'West', 'East' ) )
+```
+
+```{r}
+mod <- lm( Price ~ Service + Decor + Food + East, nyc_df )
+summary( mod )
+```
+
+**4) Wine Critics' Ratings**
+```{r}
+wine_csv <- read.csv( 'Bordeaux.csv' )
+wine_df <- data.frame( wine_csv )
+glimpse( wine_df )
+```
+
+```{r}
+dta <- wine_df %>%
+  select( c( Price, ParkerPoints, CoatesPoints ) )
+dta.r <- abs(cor(dta)) # get correlations
+dta.col <- dmat.color(dta.r) # get colors
+# reorder variables so those with highest correlation
+# are closest to the diagonal
+dta.o <- order.single(dta.r)
+cpairs(dta, dta.o, panel.colors=dta.col, gap=.5,
+main="Matrix plot of features" )
+  
+```
+
+```{r}
+wine_df <- wine_df %>%
+  mutate_at( vars( P95andAbove, FirstGrowth, 
+                   CultWine, Pomerol, VintageSuperstar ),
+             funs( factor ) )
+
+firstG <- ggplot( wine_df, aes( y = Price, x = FirstGrowth ) ) +
+  geom_boxplot()
+p95 <- ggplot( wine_df, aes( y = Price, x = P95andAbove ) ) +
+  geom_boxplot()
+cult <- ggplot( wine_df, aes( y = Price, x = CultWine ) ) +
+  geom_boxplot()
+pom <- ggplot( wine_df, aes( y = Price, x = Pomerol ) ) +
+  geom_boxplot()
+VS <- ggplot( wine_df, aes( y = Price, x = VintageSuperstar ) ) +
+  geom_boxplot()
+
+grid.arrange( firstG, p95, cult, pom, VS, ncol = 3 )
+```
+
+```{r}
+dta <- wine_df %>%
+  select( c( Price, ParkerPoints, CoatesPoints ) ) %>%
+  mutate_at( vars( Price, ParkerPoints, CoatesPoints ),
+             funs( log ) )
+dta.r <- abs(cor(dta)) # get correlations
+dta.col <- dmat.color(dta.r) # get colors
+# reorder variables so those with highest correlation
+# are closest to the diagonal
+dta.o <- order.single(dta.r)
+cpairs(dta, dta.o, panel.colors=dta.col, gap=.5,
+main="Matrix plot of log(features)" )
+  
+```
+
+Over the chapters in this book, will dive in to these data sets much deeper to model various aspects and build predictive capabilities
+
+
+<br><br><br>
