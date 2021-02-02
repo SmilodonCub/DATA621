@@ -1,0 +1,204 @@
+---
+title: 'Linear Models with `R`'
+subtitle: 'by Julian Faraway'
+author: 'notes by Bonnie Cooper'
+output:
+  rmdformats::downcute
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The following are notes from readings in ['A Modern Approach to Regression with `R`'](https://www.routledge.com/Linear-Models-with-R/Faraway/p/book/9781439887332) by Julian Faraway for the course DATA621, 'Business Analystics and Data Mining' as part of the [Masters of Science in Data Science program at CUNY SPS](https://sps.cuny.edu/academics/graduate/master-science-data-science-ms).
+
+`R` libraries used:
+```{r message=FALSE}
+library( faraway )
+library( dplyr )
+library( ggplot2 )
+library( gridExtra )
+library( tidyverse )
+library( HistData )
+```
+
+## Introduction
+*"The formulation of a problem is often more essential than its solution"*
+
+**Formulate the Problem Correctly**  
+
+* Understand the Physical Background
+* Understand the Objective
+* Make sure you know what the client wants
+* Put the Problem into Statistical Terms
+  + observational or experimental data?
+  + Is there Nonresponse?
+  + Are there Missing Values?
+  + How are the Data Coded?
+  + What are the Units of Measurement?
+  + Beware of data entry errors and other forms of data corruption
+  
+  
+### Initial Data Analysis  
+Critical to do an initial exploration to get the feel for the data. summary statistics. basic visualizations. inspect quality of the data...
+
+look at some practice data:
+```{r}
+data( pima )
+head( pima )
+```
+```{r}
+summary( pima )
+```
+
+Not all missing values are `NA`. the minimum for `diastolic` is $0$. However, that's not a realistic value for a living person. Therefore, it is more likely that this is a missing value. Look closer at `diastolic`:
+```{r}
+sort( pima$diastolic )[1:100]
+```
+clean these values up for `diastolic` and the other similar numeric variables
+```{r}
+pima_NA <- pima %>%
+  mutate( diastolic =  na_if( diastolic, 0 ),
+             glucose = na_if( glucose, 0 ),
+             triceps = na_if( triceps, 0 ),
+             insulin = na_if( insulin, 0 ),
+             bmi = na_if( bmi, 0 ) ) 
+glimpse( pima_NA )
+```
+change the `test` feature to a categorical with descriptive labels:
+```{r}
+pima_NA$test <- factor( pima_NA$test )
+levels( pima_NA$test ) <- c( 'negative', 'positive' )
+summary( pima_NA$test )
+```
+Do some basic visualization of some features:
+```{r}
+par(mfrow=c(1,3))
+pimahist <- hist( pima_NA$diastolic, xlab='Diastolic',main='' )
+pimadens <- plot( density( pima_NA$diastolic, na.rm=TRUE ), main="" )
+pimasort <- plot( sort( pima_NA$diastolic ), ylab = 'Sorted Diastolic' )
+```
+
+Now try again with ggplot:
+```{r}
+pimahist <- ggplot( pima_NA, aes( x = diastolic ) ) +
+  geom_histogram()
+pimadens <- ggplot( pima_NA, aes( x = diastolic ) ) +
+  geom_density()
+sdiastolic <- sort( pima_NA$diastolic )
+pima_sort <- data.frame( 'sorted' = sdiastolic )
+pimasort <- ggplot( pima_sort, aes( y = sorted, x = 1:length( sdiastolic ) ) ) +
+  geom_point()
+
+grid.arrange( pimahist, pimadens, pimasort, ncol = 3 )
+```
+
+Visualize some bivariate data
+```{r}
+p1 <- ggplot( pima_NA, aes( x = diastolic, y = diabetes ) ) +
+  geom_point()
+
+p2 <- ggplot( pima_NA, aes( x = test, y = diabetes ) ) +
+  geom_boxplot()
+
+grid.arrange( p1, p2, ncol = 2 )
+```
+
+`ggplot2` is a handy library that is more flexible when visualizing complex dataframes. For instance: controlling color/shape/fill by another variables, or creating faceted plots:
+```{r}
+#bisambiguating a factor variable:
+p1 <- ggplot( pima, aes( x = diastolic, y = diabetes, color = factor( test ) ) ) +
+  geom_point() +
+  theme( legend.position = 'top',
+         legend.direction = 'horizontal' )
+p2 <- ggplot( pima, aes( x = diastolic, y = diabetes ) ) +
+  geom_point( size = 1 ) +
+  facet_grid( ~ factor( test ) )
+
+grid.arrange(p1, p2, ncol=2,top="Disambiguating a factor variable")
+```
+**On Visualizations**: Good graphics are vital in data analysis. They help you avoid mistakes and suggest the form of the modeling to come. They are also important in communicating your analysis to others. Many in your audience or readership will focus on the graphs. This is your best opportunity to get your message over clearly and without misunderstanding. In some cases, the graphics can be so convincing that the formal analysis becomes just a confirmation of what has already been seen
+
+### When to use Linear Modeling
+**Linear Modeling** is used for explaining or modeling the relationship between a response/outcome/output variable and one or more predictor/input/explanatory variable(s).  
+**Simple Regression**: modeling an outcome variable with just 1 explanatory variable.  
+**Mulitple/Multivariate Regression**: modeling an outcome variable with more than 1 explanatory varaible.  
+
+**Regression Objectives**  
+
+* Prediction of future or unseen responses given specified values of the predictors
+* Assessment of an effect, or relationship between, explanatory variables and the response
+
+### History of Regression
+describing the [libration of the moon](https://www.google.com/books/edition/The_History_of_Statistics/M7yvkERHIIMC?hl=en&gbpv=1&dq=stigler+1986&pg=PA1&printsec=frontcover):
+```{r}
+data( manilius )
+glimpse( manilius )
+```
+The data are divided into three groups based on similarity. Next, compute the sum of the three coefficients by group.
+
+```{r}
+moon3 <- manilius %>%
+  group_by( group ) %>%
+  summarise( arc_sum = sum( arc ),
+             sin_sum = sum( sinang ),
+             cos_sum = sum( cosang ) )
+moon3
+```
+The result are 3 linear equations with three unknowns each to solve
+```{r}
+solve( cbind( 9, moon3$sin_sum, moon3$cos_sum ), moon3$arc_sum )
+```
+Observe how similar the results are if we fit a linear regression to the original data:
+```{r}
+mod <- lm( arc ~ sinang + cosang, manilius )
+summary( mod )
+```
+The word regression derives from a term of Sir Francis Galton's: *regression to mediocrity*  
+**Important**: regression to mediocrity refers to a particular statistical finding and is quite a different concept to that of regression.  
+Sir Francis Galton found that outcomes have a tendency towards the mean of the data using the heights of parents and their offspring. That is, tall parents are more likely to have a child shorter than they are and short parents are more likely to have a child taller than they are.  
+Here we explore this data:  
+```{r}
+data( GaltonFamilies )
+ggplot( GaltonFamilies, aes( x = midparentHeight,
+                             y = childHeight ) ) +
+  geom_point( size = 3 )
+```
+find the linear regression line the best fits the distribution
+```{r}
+mod <- lm( childHeight ~ midparentHeight, GaltonFamilies )
+coef( mod )
+```
+```{r}
+ggplot(GaltonFamilies, aes(x = midparentHeight, y = childHeight)) + 
+  geom_point() +
+  geom_smooth( method = "lm" )
+```
+Let's add the line that describes a relation where parents have children the same height as they are...
+```{r}
+ggplot(GaltonFamilies, aes(x = midparentHeight, y = childHeight)) + 
+  geom_point() +
+  geom_smooth( method = "lm" ) +
+  geom_line( aes( y = midparentHeight ), color = 'red' )
+```
+
+Now suppose children height is fully correlated to thier parents. We can use the following equation:
+$$\frac{y-\bar{y}}{SD_y} = r\frac{x-\bar{x}}{SD_x}$$
+where the correlation, $r = 1$ to find the coefficients of a line describing this:
+```{r}
+beta <- with( GaltonFamilies,
+                sd( childHeight )/ sd( midparentHeight ) )
+alpha <- with( GaltonFamilies,
+               mean( childHeight ) - 
+                 beta * mean( midparentHeight ) )
+
+ggplot(GaltonFamilies, aes(x = midparentHeight, y = childHeight)) + 
+  geom_point() +
+  geom_smooth( method = "lm" ) +
+  geom_line( aes( y = midparentHeight ), color = 'red' ) +
+  geom_abline(data=GaltonFamilies, aes(slope=beta, intercept=alpha ), color='green' )
+```
+
+**Regression to the Mean**: We can see that a child of tall parents is predicted by the least squares line to have a height which is above average but not quite as tall as the parents as
+the green line would have you believe. Similarly children of below average height parents are predicted to have a height which is still below average but not quite as short as the parents. This is why Galton used the phrase “regression to mediocrity” and the phenomenom is sometimes called the regression effect.
+
+<br><br><br>
