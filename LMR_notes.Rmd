@@ -19,6 +19,8 @@ library( ggplot2 )
 library( gridExtra )
 library( tidyverse )
 library( HistData )
+library( broom )
+library( gclus )
 ```
 
 ## Introduction
@@ -199,6 +201,210 @@ ggplot(GaltonFamilies, aes(x = midparentHeight, y = childHeight)) +
 ```
 
 **Regression to the Mean**: We can see that a child of tall parents is predicted by the least squares line to have a height which is above average but not quite as tall as the parents as
-the green line would have you believe. Similarly children of below average height parents are predicted to have a height which is still below average but not quite as short as the parents. This is why Galton used the phrase “regression to mediocrity” and the phenomenom is sometimes called the regression effect.
+the green line would have you believe. Similarly children of below average height parents are predicted to have a height which is still below average but not quite as short as the parents. This is why Galton used the phrase “regression to mediocrity” and the phenomenon is sometimes called the regression effect.
+
+### Recommended Exercises:
+**1.1** The dataset `teengamb` concerns a study of teenage gambling in Britain. Make a numerical and graphical summary of the data, commenting on any features that you find interesting. Limit the output you present to a quantity that a busy reader would find sufficient to get a basic understanding of the data.
+
+The `teengamb` dataset:
+```{r}
+data( teengamb )
+glimpse( teengamb )
+```
+```{r}
+teengamb_clean <- teengamb %>%
+  mutate( sex = factor( sex ),
+          status = factor( status ) )
+summary( teengamb_clean )
+```
+The numerical summary shows the distribution of subjects in each group for the categorical variables `sex` and `status` as well as the mode/spread of the numerical features: `income` (lbs/wk), `verbal`, and `gamble` (annual).
+
+and now to visualize the data:
+```{r}
+#visulize the numeric features by group features
+si <- ggplot( teengamb_clean, aes( x = sex, y = income, fill = sex ) ) +
+  geom_boxplot()
+sv <- ggplot( teengamb_clean, aes( x = sex, y = verbal, fill = sex ) ) +
+  geom_boxplot()
+sg <- ggplot( teengamb_clean, aes( x = sex, y = gamble, fill = sex ) ) +
+  geom_boxplot()
+
+grid.arrange( si, sv, sg, ncol = 3 )
+
+sti <- ggplot( teengamb_clean, aes( x = status, y = income, fill = status ) ) +
+  geom_boxplot() + theme(legend.position = "none")
+stv <- ggplot( teengamb_clean, aes( x = status, y = verbal, fill = status ) ) +
+  geom_boxplot() + theme(legend.position = "none")
+stg <- ggplot( teengamb_clean, aes( x = status, y = gamble, fill = status ) ) +
+  geom_boxplot() + theme(legend.position = "none")
+
+grid.arrange( sti, stv, stg, ncol = 3 )
+```
+For `sex`, both genders have a very similar distribution of `income` and `verbal` scores. However, one gender has a very different distribution for the annual gambling expenditure.
+
+There appears to be a linear relationship between `verbal` scores and `status` although for other features, the relationship is less clear. However, without knowing the meaning behind the `status` designations, it is difficult to tell.
+
+Look at how some variable covary:
+```{r}
+ggplot( teengamb_clean, aes( y = gamble, x = income, color = sex ) ) + geom_point( size = 3 ) +
+  geom_smooth(method = "lm", alpha = .15, aes(fill = sex))
+```
+If we plot the amount gambled against weekly income we see two very different trends for the different genders. Males (0) increase their gambling as a function of their weekly income whereas females (1), do not tend to gamble nor show the trend of increasing gambling with increasing income.
+
+Let's take a look at the coefficients for these regression lines:
+```{r}
+teengamb_clean %>% group_by( sex ) %>%
+  do( gambling = broom::tidy( lm( gamble ~ income, data = .))) %>% 
+  unnest( gambling )
+```
+for every GBP increase in weekly income, a male British teen gambles 6.5GBP more annually. However, there is only a negligible increase for females of 0.17.
+
+
+**1.3** The dataset `prostate` is from a study on 97 men with prostate cancer who were due to receive a radical prostatectomy. Make a numerical and graphical summary of the data as in the first question.
+
+```{r}
+data( prostate )
+glimpse( prostate )
+```
+let's learn what the variables are before proceeding:  
+
+* lcavol -> log(cancer volume)
+* lweight -> log(prostate weight)
+* age -> age (years)
+* lbph -> log(benign prostatic hyperplasia amount)
+* svi -> seminal vesicle invasion
+* lcp -> log(capsular penetration)
+* gleason -> Gleason score
+* pgg45 -> percentage Gleason scores 4 or 5
+* lpsa -> log(prostate specific antigen)
+
+observe summaries of each feature:
+```{r}
+# svi appears to be binary, so make that adjust:
+prostate_clean <- prostate %>%
+  mutate( svi = factor( svi ) )
+summary( prostate_clean )
+```
+generate a matrix plot ordered by degree of correlation:
+```{r}
+dta <- prostate_clean %>%
+  select( -c( svi, gleason ) )
+dta.r <- abs(cor(dta)) # get correlations
+dta.col <- dmat.color(dta.r) # get colors
+# reorder variables so those with highest correlation
+# are closest to the diagonal
+dta.o <- order.single(dta.r)
+cpairs(dta, dta.o, panel.colors=dta.col, gap=.5,
+main="Matrix plot of features" )
+```
+we observe a number of cross-correlations that might need attention for further analysis. For example, `lbph`, or the amount of benign prostatic hyperplasia amount is highly correlated with the weight of the prostate, `lweight`.
+
+the Gleason Score assesses the severity of prostate cancer: A Gleason score of 6 is low grade, 7 is intermediate grade, and a score of 8 to 10 is high grade cancer.
+
+We might be interested in using these features to find out what is predictive of `gleason`. How predictive are certain data features correlate with the Gleason Score?
+
+**1.4** The dataset `sat` comes from a study entitled “Getting What You Pay For: The Debate Over Equity in Public School Expenditures.” Make a numerical and graphical summary of the data as in the first question.
+
+```{r}
+data( sat )
+glimpse( sat )
+```
+observe the general properties of each variable
+```{r}
+summary( sat )
+```
+generate a matrix plot ordered by degree of correlation:
+```{r}
+dta <- sat
+dta.r <- abs(cor(dta)) # get correlations
+dta.col <- dmat.color(dta.r) # get colors
+# reorder variables so those with highest correlation
+# are closest to the diagonal
+dta.o <- order.single(dta.r)
+cpairs(dta, dta.o, panel.colors=dta.col, gap=.5,
+main="Matrix plot of features" )
+```
+
+Plot the trends for sat scores as a function of expenditure:
+```{r}
+sat_scores <- sat %>%
+  select( expend, verbal, math ) %>%
+  pivot_longer( cols = c( verbal, math ), 
+                names_to = 'testcat',
+                values_to = 'score' )
+ggplot( sat_scores, aes( x = expend, y = score, color = testcat ) ) +
+  geom_point( size = 2 ) +
+  ylab( 'score' )
+```
+This plot suggests that there is a negative relationship between the expenditures of a state and the average sat scores for both math and verbal.
+
+```{r}
+sat_scores %>% group_by( testcat ) %>%
+  do( exscor = broom::tidy( lm( score ~ expend, data = .))) %>% 
+  unnest( exscor )
+```
+
+look at the cummulative scores
+```{r}
+sat_total_lm <- sat %>%
+  do( totalsat = broom::tidy( lm( total ~ expend, data = . ) ) ) %>%
+  unnest( totalsat )
+sat_total_lm
+```
+Although the negative relationship is significant, this does not take into account an important confounding variable: the percentage of students that takes the exam:
+
+```{r}
+ggplot( sat, aes( y = total, x = takers ) ) +
+  geom_point( size = 2 )
+```
+Perform a multiple linear regression that includes the percentage of people taking the sat
+```{r}
+satmod <- lm( total ~ expend + takers, sat )
+summary( satmod )
+```
+There is a dramatic improvement in the model fit when percentage of sat test takers is included. However, there is definitely room for improving on this model. For instance, the 'U' shaped envelope of the relationship between total score and percent test takers hints at a nonlinearity. Additionally, there are more data features in the set that could be explored.
+
+**1.5** The dataset 'divusa' contains data on divorces in the United States from 1920 to 1996. Make a numerical and graphical summary of the data as in the first question.
+
+```{r}
+data( divusa )
+glimpse( divusa )
+```
+inspect the summary stats:
+```{r}
+summary( divusa )
+```
+Use `facet_wrap()` to look at how each of the features varies with time (`year`):
+```{r}
+divusa_long <- divusa %>%
+  pivot_longer( cols = c( divorce, unemployed, femlab, marriage, birth, military ), names_to = 'cat', values_to = 'val' )
+ggplot( aes( x = year, y = val ), data = divusa_long ) +
+  geom_line() +
+  #geom_point() +
+  facet_wrap( ~ cat )
+```
+There are a few trends we see that occur over time:  
+
+* the increase in percentage of women in the workplace
+* spikes in military/femlab/divorce/marriage coinciding with WW2
+* a peak in unemployment corresponding with the great depression
+
+and now to view pairwise comparisons:
+```{r}
+dta <- divusa
+dta.r <- abs(cor(dta)) # get correlations
+dta.col <- dmat.color(dta.r) # get colors
+# reorder variables so those with highest correlation
+# are closest to the diagonal
+dta.o <- order.single(dta.r)
+cpairs(dta, dta.o, panel.colors=dta.col, gap=.5,
+main="Matrix plot of features" )
+```
+There are several relationships that look interesting to explore further:  
+
+* the percentage of women in the workplace has a positive correlation with the divorce rate and a negative relationship with the marriage rate.
+* the birth rate has a similar relationship: positively correlated with marriage and negatively correlated to divorce
+* Not immediately clear from the previous figure: we see that divorce has a positive correlation with time whereas marriage is negative
+
 
 <br><br><br>
