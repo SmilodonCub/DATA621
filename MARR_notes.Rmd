@@ -18,7 +18,7 @@ library( dplyr )
 library( ggplot2 )
 library( gridExtra )
 library( tidyverse )
-library(gclus)
+library( gclus )
 ```
 
 ## Introduction
@@ -44,16 +44,16 @@ unique( nflfg_df$Name )
 the incorrect approach just looks at the correlation between feild goal percentages one year and the previous:
 ```{r}
 nflfg_yeardif <- nflfg_df %>%
-  select( c( Name, Yeart, FGt ) ) %>%
+  dplyr::select( c( Name, Yeart, FGt ) ) %>%
   pivot_wider( names_from = Yeart, values_from = FGt )
 nflfg_yeardif
 
 firstY <- nflfg_yeardif %>%
-  select( c( `2003`, `2004`, `2005` ) ) %>%
+  dplyr::select( c( `2003`, `2004`, `2005` ) ) %>%
   pivot_longer( cols = everything(), names_to = 'Year1', values_to = 'val1' )
 
 NextY <- nflfg_yeardif %>%
-  select( c( `2004`, `2005`, `2006` ) ) %>%
+  dplyr::select( c( `2004`, `2005`, `2006` ) ) %>%
   pivot_longer( cols = everything(), names_to = 'Year2', values_to = 'val2' )
 
 
@@ -87,7 +87,7 @@ by_athlete <- BothY %>%
 lm_byAthlete <- do( by_athlete, tidy( lm( val2 ~ val1, data = . ) ) )
 
 lm_byAthlete <- lm_byAthlete %>%
-  select( c( Names, term, estimate ) ) %>%
+  dplyr::select( c( Names, term, estimate ) ) %>%
   pivot_wider( names_from = term, values_from = estimate )
 
 
@@ -131,7 +131,7 @@ glimpse( nyc_df )
 ```
 ```{r}
 dta <- nyc_df %>%
-  select( c( Price, Food, Decor, Service ) )
+  dplyr::select( c( Price, Food, Decor, Service ) )
 dta.r <- abs(cor(dta)) # get correlations
 dta.col <- dmat.color(dta.r) # get colors
 # reorder variables so those with highest correlation
@@ -165,7 +165,7 @@ glimpse( wine_df )
 
 ```{r}
 dta <- wine_df %>%
-  select( c( Price, ParkerPoints, CoatesPoints ) )
+  dplyr::select( c( Price, ParkerPoints, CoatesPoints ) )
 dta.r <- abs(cor(dta)) # get correlations
 dta.col <- dmat.color(dta.r) # get colors
 # reorder variables so those with highest correlation
@@ -198,7 +198,7 @@ grid.arrange( firstG, p95, cult, pom, VS, ncol = 3 )
 
 ```{r}
 dta <- wine_df %>%
-  select( c( Price, ParkerPoints, CoatesPoints ) ) %>%
+  dplyr::select( c( Price, ParkerPoints, CoatesPoints ) ) %>%
   mutate_at( vars( Price, ParkerPoints, CoatesPoints ),
              funs( log ) )
 dta.r <- abs(cor(dta)) # get correlations
@@ -214,4 +214,63 @@ main="Matrix plot of log(features)" )
 Over the chapters in this book, will dive in to these data sets much deeper to model various aspects and build predictive capabilities
 
 
+
+## Simple Linear Regression
+modeling the relationship between two variables as a straight line, that is, when $Y$ is modeled as a linear function of $X$.
+
+### Introduction to Least Squares Estimates
+
+```{r}
+production_url <- 'https://raw.githubusercontent.com/SmilodonCub/DATA621/master/production.txt'
+production_df <- read.table( production_url, sep = '\t', header = TRUE )
+glimpse( production_df )
+```
+
+```{r}
+ggplot( production_df, aes( x = RunSize, y = RunTime ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 4 ) +
+  xlab( 'Run Size' ) +
+  ylab( 'Run Time' )
+```
+ We wish to develop an equation to model the relationship between Y, the run time, and X, the run size.  
+ 
+If the regression of Y on X is linear:
+$$Y_i = \mbox{E}(Y|X=x) + e_i = \beta_0 + \beta_1 x + e_i$$
+where $e_i$ is the random error in $Y_i$  
+all unexplained variation is called random error. Random error does not depend on X, nor does it contain any information about Y (otherwise it would be systematic error).  
+**residuals**: the difference between the actual value of y and the predictor value of y.  
+we wish to describe a line of best fit which minimizes the residuals.  
+
+fit the production data with a linear model and visualize the residuals:  
+```{r}
+mod <- lm( RunTime ~ RunSize, production_df )
+production_df$pred <- predict( mod )
+production_df$res <- residuals( mod )
+glimpse( production_df )
+```
+```{r}
+ggplot( production_df, aes( x = RunSize, y = RunTime ) ) +
+  geom_smooth(method = "lm", se = FALSE, color = "lightgrey") +
+  geom_segment(aes(xend = RunSize, yend = pred), alpha = .2) + 
+  geom_point() +
+  geom_point(aes(y = pred), shape = 1) +
+  theme_classic()  
+```
+**Least Squares** line of best fit
+coefficients for the line of best fit are chosen so as to minimize the sum of the squared residuals:
+$$\mbox{RSS} = \sum^n_{i=1}\hat{e}^2_i = \sum^n_{i=1}(y_y-\hat{y}_i)^2 = \sum^n_{i=1}(y_i - b_0 - b_1x_i)^2$$
+```{r}
+summary( mod )
+```
+The equation for the best fit line is given by:
+$$y = \beta_0 + \beta_1 x = 149.7 + 0.26x$$
+* The **intercept**, 149.7, is where the line of best fit crosses the y-axis.
+* The **slope**, 0.26, estimates the change in relationship of `RunTime` as a function of `RunSize`. The slope is informative and describes a 0.26 increase in `RunTime` for every unit increase of `RunSize`.
+
+Estimating the variance of the error $\sigma^2 = Var(e)$  
+The residuals can be used to estimate $\sigma^2$
+$$S^2 = \frac{\mbox{RSS}}{n-2} = \frac{1}{n-2}\sum^n_{i=1}\hat{e}_i^2$$
+ 
+ 
+ 
 <br><br><br>
