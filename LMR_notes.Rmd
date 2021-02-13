@@ -21,6 +21,8 @@ library( tidyverse )
 library( HistData )
 library( broom )
 library( gclus )
+library( asbio )
+library( retistruct )
 ```
 
 ## Introduction
@@ -263,7 +265,7 @@ for every GBP increase in weekly income, a male British teen gambles 6.5GBP more
 **1.3** The dataset `prostate` is from a study on 97 men with prostate cancer who were due to receive a radical prostatectomy. Make a numerical and graphical summary of the data as in the first question.
 
 ```{r}
-data( prostate )
+data( prostate, package = 'faraway' )
 glimpse( prostate )
 ```
 let's learn what the variables are before proceeding:  
@@ -406,5 +408,248 @@ There are several relationships that look interesting to explore further:
 * the birth rate has a similar relationship: positively correlated with marriage and negatively correlated to divorce
 * Not immediately clear from the previous figure: we see that divorce has a positive correlation with time whereas marriage is negative
 
+## Estimation
+
+### Linear Model
+suppose we want to model a response property $Y$ by three feature variables $X_1$ $X_2$ and $X_3$. A general form to represent that is given:
+$$Y = f(X_1,X_2,X_3) + \epsilon$$
+typically, we won't ever know the true $f$. For linear models, we make the assumption that parameters enter linearly to predict the response:
+$$Y = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \beta_3 X_3 + \epsilon$$
+Linear models seem restrictive, but predictors can be transformed and combined such that linear models can be applied. Linear model implies simplicity, however, in practice linear models and the data they describe may in fact be quite complex.  
+Where do linear models come from?  
+
+* Physical Theory may suggest a model (Hooke's Law)
+* Experience with past data
+* No prior data exists (linear model used as a starting point)
+
+*A good model is like a map that guides us to our destination*
+
+### Estimating \beta
+We would like to choose $\beta$ such that the systematic component of our model explains as much of the response as possible. where:
+
+| Data =        | Systemic Structure | + | Random Variation |
+|---------------|--------------------|---|------------------|
+| n dimentions= | p dimensions       | + | (n-p) dimensions |
+
+The difference between the actual response and the predicted response = the residual. 
+The conceptual purpose of the linear model is to represent as accurately as possible, some data that is complex with n-dimensions with something that is comparatively simple, a model with just 'p' terms/coefficients.
+
+### Least Squares Estimation
+The random variation in the residuals lies in the n-p dimensional space; the aim of fitting a model is the minimize the residuals.  
+n-p = *degrees of freedom*  
+RSS = Residual Sum of Squares  
+estimate of $\sigma^2$: $\hat{\sigma}^2 = \frac{RSS}{n-p}$
+
+### An Example from the Galapagos
+```{r}
+data( gala )
+glimpse( gala )
+```
+fit a linear model using `lm()`
+```{r}
+gala_mod <- lm( Species ~ Area + Elevation + Nearest + Scruz + Adjacent, data = gala )
+gala_mod_sum <- summary( gala_mod )
+gala_mod_sum 
+```
+the abridged output alternative from the `faraway` library:
+```{r}
+sumary( gala_mod )
+```
+
+Let's directly calculate some quantities of interest:
+```{r}
+#extract the feature matrix and the response variable:
+fmat <- model.matrix( ~ Area + Elevation + Nearest + Scruz + Adjacent, gala )
+r <- gala$Species
+```
+construct $(X^TX)^{-1}$:
+```{r}
+xtxi <- solve( t( fmat ) %*% fmat )
+```
+get $\hat{\beta}$ by calculating $(X^TX)^{-1}X^Ty$:
+```{r}
+xtxi %*% t( fmat ) %*% r
+```
+A more efficient and accurate way to get $\hat{\beta}$:
+```{r}
+solve( crossprod( fmat, fmat ), crossprod( fmat, r ) )
+```
+compare with the `lm()` results:
+```{r}
+sumary( gala_mod )
+```
+We can extract a lot of information from the lm structure:
+```{r}
+residuals( gala_mod ) #extract the residuals
+fitted( gala_mod ) #extract the model predictions
+df.residual( gala_mod ) #extract the degrees of freedom
+deviance( gala_mod ) #gives the RSS
+coef( gala_mod ) #returns the coefficient estimates
+```
+
+estimate $\sigma$:
+```{r}
+sqrt( deviance( gala_mod ) / df.residual( gala_mod ) )
+gala_mod_sum$sigma
+```
+compute the standard error for the coefficients
+```{r}
+xtxi <- gala_mod_sum$cov.unscaled
+SE <- sqrt( diag( xtxi ) ) * gala_mod_sum$sigma
+SE
+```
+or extract the SE
+```{r}
+gala_mod_sum$coef[,2]
+```
+There are great reasons to use Least Squares:  
+
+* It makes sense geometrically (makes an orthogonal projection onto model space)
+* If the errors are independent and identically normally distributed, it estimates the maximum likelihood
+* The Gause-Markov rule states that $\hat{\beta}$ is the best linear unbiased estimate
+
+However, there are some situations where Least Squares might not be the best:
+
+* When errors are correlated of have unequal variance
+* When the error distribution is long-tailed
+* When the predictors are collinear
+
+### Goodness of Fit
+a measure of how well the model fits the data.  
+*$R^2$* or the **coefficient of determination** or the **percentage of variance explained**:
+$$R^2 = 1 - \frac{\mbox{RSS}}{\mbox{Total SS(Corrected for Mean)}} = \mbox{cor}^2 (\hat{y},y)$$
+It is a mistake to rely on $R^2$ as the sole measure of goodness of fit.
+```{r}
+op <- par(mfrow=c(1,4),mar=c (0,0,2,3), oma = c(5, 4.2, 0, 0))
+with(anscombe, plot(x1, y1, xlab = "", ylab = "", main = bquote(paste(italic(r),
+" = ",.(round(cor(x1, y1),2)))))); abline(3,0.5) 
+with(anscombe, plot(x2, y2, xlab = "", ylab = "", main = bquote(paste(italic(r),
+" = ",.(round(cor(x2, y2),2)))))); abline(3,0.5) 
+with(anscombe, plot(x3, y3, xlab = "", ylab = "", main = bquote(paste(italic(r),
+" = ",.(round(cor(x3, y3),2)))))); abline(3,0.5) 
+with(anscombe, plot(x4, y4, xlab = "", ylab = "", main = bquote(paste(italic(r),
+" = ",.(round(cor(x4, y4),2)))))); abline(3,0.5) 
+mtext(expression(italic(y[1])),side=1, outer = TRUE, line = 3)
+mtext(expression(italic(y[2])),side=2, outer = TRUE, line = 2.6)
+mtext("(a)",side=3, at = -42, line = .5)
+mtext("(b)",side=3, at = -26, line = .5)
+mtext("(c)",side=3, at = -10.3, line = .5)
+mtext("(d)",side=3, at = 5.5, line = .5)
+par(op)
+# }
+```
+All 4 of these distributions result in the same lm slope with the same $R^2$ value.
+
+$\hat{\sigma}$ is another measure returned by the `lm()` summary that is in the same units as the response variable.
+
+### Identifiability
+Unidentifiability will occur when $X$ is not of full rank. e.g. columns that are linear combinations of one another.
+
+### Orthogonality
+```{r}
+data( odor )
+glimpse( odor )
+```
+compute the covariance:
+```{r}
+cov( odor[,-1] )
+```
+```{r}
+odor_mod <- lm( odor ~ temp + gas + pack, odor )
+summary( odor_mod, cor = T )
+```
+The Correlation Coefs are 0.  
+These feature variables are entirely independent
+
+### Exercises
+
+#### 2.4
+The dataset `prostate` comes from a study on 97 men with prostate cancer who were due to receive a radical prostatectomy. Fit a model with lpsa as the response and lcavol as the predictor. Record the residual standard error and the $R^2$ . Now add lweight, svi, lbph, age, lcp, pgg45 and gleason to the model one at a time. For each model record the residual standard error and the $R^2$. Plot the trends in these two statistics.
+
+```{r}
+data( prostate, package = 'faraway' )
+glimpse( prostate )
+```
+fit model and keep track of residual standard error and $R^3$:
+```{r}
+formula <- ''
+formulas <- c()
+res_std_err <- c()
+r_sqrd <- c()
+feature_order <- c( 'lcavol', 'lweight', 'svi', 'lbph', 'age', 'lcp', 'pgg45', 'gleason' )
+for (i in 1:length( feature_order )) {
+  if (i == 1) {
+    formula <- paste0('lpsa', " ~ ", feature_order[i] )
+  }
+  else {
+    formula <- paste0(formula, " + ", feature_order[i] )
+  }
+  mod_sum <-  summary( lm( formula, data = prostate ) )
+  res_std_err[[i]] <- mod_sum$sigma
+  r_sqrd[[i]] <- mod_sum$r.squared
+  #print( formula )
+}
+
+mods_df <- data.frame( 'n_terms' = seq( 1,8 ),
+                       'sigma' = unlist(res_std_err, recursive = FALSE),
+                       'r_sqrd' = unlist(r_sqrd, recursive = FALSE) )
+glimpse( mods_df )
+```
+
+visualize the trends of the summary statistics:
+```{r}
+sigma_plot <- ggplot( mods_df, aes( x = n_terms, y = sigma ) ) +
+  geom_point(fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_line() +
+  xlab( 'Number of features added to lm()' ) +
+  ylab( 'sigma' ) +
+  theme_classic() 
+
+r_sqrd_plot <- ggplot( mods_df, aes( x = n_terms, y = r_sqrd ) ) +
+  geom_point(fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_line() +
+  xlab( 'Number of features added to lm()' ) +
+  ylab( 'R^2' ) +
+  theme_classic() 
+
+grid.arrange( sigma_plot, r_sqrd_plot, ncol = 2 )
+```
+
+
+#### 2.5
+Using the prostate data, plot lpsa against lcavol. Fit the regressions of lpsa on lcavol and lcavol on lpsa. Display both regression lines on the plot. At what point do the two lines intersect?
+
+```{r}
+m <- lm(lcavol ~ lpsa, prostate)
+m2 <- lm(lpsa ~ lcavol, prostate)
+
+plot1 <- ggplot(prostate, aes(lcavol, lpsa)) +
+  geom_point(fill = NA, shape = 21, alpha = 0.5, size = 3) +
+  geom_line(aes(x = predict(m), color = "lcavol ~ lpsa")) +
+  geom_line(aes(y = predict(m2), color = "lpsa ~ lcavol")) +
+  theme_classic() 
+plot1
+```
+find the intersection of the two lines:
+```{r}
+m_aug <- augment( m )
+m2_aug <- augment( m2 )
+P3 <- c( m2_aug$lcavol[1], m2_aug$.fitted[1] )
+P4 <- c( m2_aug$lcavol[length( m2_aug$lcavol )], m2_aug$.fitted[length( m2_aug$lcavol )] )
+P1 <- c( m_aug$.fitted[1], m_aug$lpsa[1] )
+P2 <- c( m_aug$.fitted[length( m_aug$lcavol )], m_aug$lpsa[length( m_aug$lcavol )] )
+intersect <- line.line.intersection(P1, P2, P3, P4, interior.only = TRUE)
+int_df <- data.frame( 'X' = intersect[1], 'Y' = intersect[2] )
+int_df
+```
+visually confirm the intersection
+```{r}
+coords <- paste( '(', round(int_df$X,2), ',', round(int_df$Y,2), ')' )
+plot1 + annotate(geom="point", x=int_df$X, y=int_df$Y,
+              color="red") +
+  annotate(geom="text", x=2, y=2, label=coords,
+              color="red")
+  ggtitle( 'intersection of lm() model fits' )
+```
 
 <br><br><br>
