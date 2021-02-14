@@ -23,6 +23,7 @@ library( broom )
 library( gclus )
 library( asbio )
 library( retistruct )
+library( Matching )
 ```
 
 ## Introduction
@@ -651,5 +652,323 @@ plot1 + annotate(geom="point", x=int_df$X, y=int_df$Y,
               color="red")
   ggtitle( 'intersection of lm() model fits' )
 ```
+
+## Inference
+
+### Hypothesis Tests to Compare Models
+**F-statistic**: A statistic used to evaluate the residuals for the model compared to the null hypothesis.  
+$$F = \frac{ \frac{(RSS_{\omega}-RSS_{\Omega})}{p-q}}{\frac{ RSS_{\Omega}}{n-p}} \sim F_{p-q,n-p}$$
+We would reject the null hypothesis if $F\gt F_{p-q,n-p}^{(\alpha)}$
+Where p = num parameters in $\Omege$ and q is the num params in $\omega$. The degrees of freedom of a model at typically the number of observations - the number of parameters, so F can also be written as:
+$$F = \frac{ \frac{(RSS_{\omega}-RSS_{\Omega})}{df_{\omega}-df_{\Omega}}}{\frac{ RSS_{\Omega}}{df_{\Omega}}}$$
+
+#### Are any of the Feature Variables Useful in Predicting the Response?
+We do not know whether all predictors are required to predict a response or just some. The F-statistic can help determine this.  
+
+Demonstrate this by revisiting the data from the Galapagos:
+```{r}
+gala_mod_sum
+```
+model the Null Hypothesis and perform an ANOVA:
+```{r}
+gala_nullmod <- lm( Species ~ 1, gala )
+anova( gala_nullmod, gala_mod )
+```
+Directly computing the F-stat & it's p-value:
+```{r}
+rss0 <- deviance( gala_nullmod )
+rss <- deviance( gala_mod )
+df0 <- df.residual( gala_nullmod )
+df <- df.residual( gala_mod )
+fstat <- ((rss0-rss)/(df0-df)/(rss/df))
+fstat
+1 - pf( fstat, df0-df, df )
+```
+
+#### Can 1 particular feature be dropped from a model?
+Let $\Omega$ be the full model.  
+Let $\omega$ be the full model - suspect feature.  
+Test whether the feature can be dropped by looking at the F-statistic. 
+The null hypothesis is that $H_0 : \beta_i = 0$
+
+```{r}
+gala_mod_noArea <- lm( Species ~ Elevation + Nearest + Scruz + Adjacent, gala )
+anova( gala_mod_noArea, gala_mod )
+```
+The p-val of 0.3 indicates that the Null cannot be rejected
+
+#### Testing a pair of predictors
+Fit a model without the pair & build the F-test:
+```{r}
+gala_mod_noAreas <- lm( Species ~ Elevation + Nearest + Scruz, gala )
+anova( gala_mod_noAreas, gala_mod )
+```
+Here, the F-test is statistically significant suggesting that we can reject the null hypothesis. The rejection suggests that there is a difference in the amount of residual error that is accounted for between the two models therefore, removing the pair of feature variables cannot be justified.  
+
+#### Testing a Subspace  
+
+* Can we combine two features? use the `I()`, or interaction function to test linear combinations of feature variables
+* Can a feature be set to a particular values? use the `offset()` function
+
+#### What can't we use an F-test to evaluate?  
+
+* Non-linear relationships. ex: $H_0 : \beta_j \beta_k = 1$
+* the null model needs to be in the feature subspace of the full model.  
+
+### Permutation Tests: when you don't want to assume normality
+**Permutation Test**: what is the chance that the F-test is larger than we observed? We could compute this exactly by computing the F-stat for all permutations of the response variable and see what proportion have greater F-tests.
+
+```{r}
+gala_mod_2 <- lm( Species ~ Nearest + Scruz, gala )
+gala_mod_2_sum <- summary( gala_mod_2 )
+gala_mod_2_sum$fstatistic
+1 - pf( gala_mod_2_sum$fstatistic[1],
+        gala_mod_2_sum$fstatistic[2],
+        gala_mod_2_sum$fstatistic[3])
+#anova( gala_mod_noAreas, gala_mod )
+```
+use the `sample()` function to repeat this 4000x
+```{r}
+nreps <- 4000
+fstats <- numeric( nreps )
+for (i in 1:nreps ) {
+  lmsum <- summary( lm( sample( Species ) ~ Nearest + Scruz, gala ) )
+  fstats[i] <- lmsum$fstat[1]
+}
+
+mean( fstats > gala_mod_2_sum$fstatistic[1] )
+```
+
+## Prediction
+Prediction is one of the main uses for regression models. However, a point estimate is not the end of the story. It is as important to consider the uncertainty of the estimate so that we may understand the range of expected outcomes. Projections are not useful without a realistic estimate of uncertainty because we need to make sensible plans for when events do not turn out as well as predicted. 
+
+### Confidence Intervals for Prediction
+
+* **Prediction of a Mean Response**: Confidence Interval
+  + $\hat{y}_0 \pm t_{n-p}^{\frac{\alpha}{2}}\hat{\sigma} \sqrt{x_0^T(X^TX)^{-1}x_0}$
+  + There is a 95% chance that the mean value falls within this CI
+* **Prediction of a Future Observations**: Prediction Interval
+  + $\hat{y}_0 \pm t_{n-p}^{\frac{\alpha}{2}}\hat{\sigma} \sqrt{1 + x_0^T(X^TX)^{-1}x_0}$
+  + There is a 95% chance that the future value falls with in this PI
+* **Extrapolation**: Predicting an estimate for values that lie outside of the given data range
+
+### Example: Body Fat
+load body fat data:
+```{r}
+data( fat )
+#glimpse( fat )
+fatmod <- lm( brozek ~ age + weight + height + 
+                neck + chest + abdom + hip + thigh + 
+                knee + ankle + biceps + forearm + 
+                wrist, data = fat )
+summary( fatmod )
+```
+Consider a 'typical' man (mean features).
+```{r}
+x <- model.matrix( fatmod )
+x0 <- apply( x, 2, median )
+x0
+```
+
+```{r}
+fat_select <- fat %>%
+  select( c( age, weight, height, neck, chest, abdom, hip, thigh, knee, ankle, biceps, forearm, wrist ) )
+meanMan <- colMeans( fat_select )
+meanMan
+```
+if we are predicting the expected value and PI for an individual with mean features:
+```{r}
+predict( fatmod, newdata = data.frame( t( meanMan ) ), interval = 'prediction' )
+```
+if we are predicting the mean body fat for all men that have mean characteristics
+```{r}
+predict( fatmod, newdata = data.frame( t( meanMan ) ), interval = 'confidence' )
+```
+#### Extrapolation
+the further away the values are from the original data, the more uncertainty there is in the estimations.  
+Compare the intervals calculated below with those for the mean 'typical' body metrics:
+```{r}
+extremeFat <- apply( x, 2, function( x ) quantile( x, 0.95 ) )
+predict( fatmod, newdata = data.frame( t( extremeFat ) ), interval = 'prediction' )
+predict( fatmod, newdata = data.frame( t( extremeFat ) ), interval = 'confidence' )
+```
+
+
+### Autoregression
+
+Consider the trends in this data on monthly airline passengers:
+
+```{r}
+data( airpass, package = 'faraway' )
+AirlinePlot <- ggplot( airpass, aes( x = year, y = pass ) ) +
+  geom_line() +
+  ylab( 'Log(Passengers)' ) +
+  theme_classic() +
+  ggtitle( 'Airline Passengers', subtitle =  'with an obviously inappropriate linear regression fit')
+
+AirlinePlot +   geom_smooth( method = 'lm' )
+```
+
+The linear fit above captures the increase in passengers over the years, but does nothing to capture the seasonal variation in the data.
+
+**Autoregressive model**: the response depends on past values of the response. So, build into the model is a feature variable that describes a previous response. For example, it may be the case that we would like to predict the passengers for next month. We would like to know the expected change in ridership to predict next months ridership. Autoregressive 'lagged' variables can be incorporated into the model to describe the number of passengers from previous months:  
+
+$$y_t = \beta_0 + \beta_1y_{t-1} + \beta_{12}y_{t-12} + \beta_{13}y_{t-13} + \epsilon_t $$
+
+```{r}
+lagdf <- embed( log( airpass$pass ), 14 )
+colnames( lagdf ) <- c( 'y', paste0( 'lag',1:13 ) )
+lagdf <- data.frame( lagdf )
+#build our linear model:
+armod <- lm( y ~ lag1 + lag12 + lag13, lagdf )
+summary( armod )
+```
+visualize the autoregressive model fit:
+```{r}
+airpass_lag <- airpass[14:144,]
+airpass_lag[ 'predict' ] <- exp( predict( armod ) )
+AirlinePlot +
+  geom_line( aes( x = year, y = predict, color = 'red' ), data = airpass_lag, show.legend = FALSE )
+```
+
+predicting future values:
+use the last observation in the data as the lag one value:
+```{r}
+#last value of the data
+last_row_df <- lagdf[ nrow( lagdf ), ]
+# the current response variable ('y') will become lag1 and everything else shifts over 1:
+new_data <- data.frame( lag1 = last_row_df$y, lag12 = last_row_df$lag11, lag13 = last_row_df$lag12 )
+#prediction:
+next_month_res <- predict( armod, newdata = new_data, interval = 'prediction' )
+
+paste( 'The Autoregression Mod predicts', round( exp( next_month_res[1] ),0), 
+       'passengers with a 95% confidence interval from', round( exp( next_month_res[2] ),0),
+       'to', round( exp( next_month_res[3] ),0))
+```
+
+### What can go wrong with predictions?
+
+* Bad Models: If it doesn't fit, don't apply it.
+* Quantitative Extrapolation: We try to predict outcomes for cases with predictor values much different from what we saw in the data
+* Qualitative Extrapolation: We try to predict outcomes for observations that come from different populations
+* Overconfidence due to overfitting: data is not robust to new data
+* Black swans: might not have enough data to properly describe the distribution
+
+
+## Explanation
+The relationships between variables. can include causal conclusions, however these require more rigor.
+
+### Simple Meaning
+a simple interpretation of model coefficients: *unit increase in $x_1$ with the other predictors help constant will produce a change of $\hat{\beta_1}$ in the response variable $y$.* This is conceptually difficult: IRL there is no way to hold these variables constant to observe the model's effects and it is not likely that the model captures all contributing variables to the system. Furthermore, our model's explanation contains no notion of explanation.
+
+### Establishing Causality  
+causality is determined by experimentally manipulating a variable. Consider a drug trial test with a placebo group and a test group. We can describe the causal effect as:
+$$\delta_i = y_i^{\mbox{test}}-y_y^{\mbox{control}}$$
+
+### Designed Experiments
+**Randomization is key to success** 
+
+* Randomization is the only reliable way to make sure that the two groups are not unbalances in some way that 
+favors either experimental groups.
+* Randomization can be used to validate assumptions. (e.g. permutation tests used to test the significance of differences between groups)
+
+On Generalization: The results of randomized experiments apply to the subjects of the experiment unless we can reasonably claim that these subjects are representative of a larger population.  
+On Blocking: There may be ways that subjects differ from one another that are identifiable and that can be worked into the experiment. (e.g. Gender).
+
+### Observstional Data
+Cannot always collect data in a designed experiment.
+Consider this dataset from the Democratic primary of 2008:
+```{r}
+data( newhamp )
+glimpse( newhamp )
+```
+look at the difference in counts for Digital vs Hand cast ballots for Obama vs Clinton
+```{r}
+newhamp %>% group_by( votesys ) %>% 
+  summarise( 'Obama' = sum( Obama ),
+             'Clinton' = sum( Clinton ) ) %>%
+  mutate( 'Obama_gt_percent' = (Obama - Clinton)/(Obama + Clinton)*100 )
+```
+We can see that for digital ballots, Clinton received ~6% more votes than Obama whereas for paper ballots Obama received about 8% more of the vote.  
+Is this difference in votes based on voting system significant?  
+Here we fit a linear model to proportion of votes for Obama ~ Hand voting.  
+First we create a dummy variable for whether the record is for hand votes:
+```{r}
+newhamp_trt <- newhamp %>%
+  mutate( treatment = case_when( votesys == 'H' ~ 1,
+                                 votesys == 'D' ~ 0 ) )
+newhamp_trt %>% do( tidy( lm( pObama ~ treatment, . ) ) )
+```
+The p-value for the treatment group suggests that there is a significant difference between the proportion of vote for Obama given the voting system used. However, were there other variables involved? Did the voting system have some causal effect on the outcome?  
+In other words, is there a **confounding variable**?
+
+```{r}
+glimpse( newhamp )
+newhamp_trt %>%
+  do( tidy( lm( pObama ~ treatment + Dean + Kerry + povrate + white, . ) ) )
+```
+If we include other variables we see that our treatment variable is no longer a statistically significant towards predicting the proportion of votes for Obama.
+
+### Matching
+for matched pairs where two members of each pair are as alike as possible with respect to confounders.  
+we will use the `Matching` library for this:
+```{r}
+set.seed( 123 )
+matches <- GenMatch( newhamp_trt$treatment, newhamp_trt$Dean,
+                     ties = FALSE, caliper = 0.05, pop.size = 1000 )
+head( matches$matches[ ,1:2 ] )
+```
+The output above shows some of the pairs of one subject who voted by hand/paper vs one subject who voted digitally matched by thier propensity to vote have voted for Howard Dean in the previous election.
+
+Show all the matches when plotted pObama ~ Dean
+```{r}
+plot( pObama ~ Dean, newhamp_trt, pch = treatment + 1 )
+with( newhamp_trt, segments( Dean[ matches$matches[ ,1 ] ], 
+                             pObama[ matches$matches[ ,1 ] ],
+                             Dean[ matches$matches[ ,2 ] ],
+                             pObama[ matches$matches[ ,2 ] ] ) )
+```
+From the figure above, we can see that the matches are reasonably well made for values of `Dean`  
+
+Is there any indication of a bias for voting system within the matched pairs?  
+Here we compute the difference between pairs
+```{r}
+pdiff <- newhamp_trt$pObama[ matches$matches[ ,1 ] ] - 
+  newhamp_trt$pObama[ matches$matches[ ,2 ] ]
+t.test( pdiff )
+```
+```{r}
+plot( pdiff ~ newhamp_trt$Dean[ matches$matches[ ,1 ] ], 
+      xlab = 'Dean', ylab = 'Hand - Digital' )
+abline( h = 0 )
+```
+The matched pairs show no clear preference for hand vs digital voting.
+The observed difference appears to be because voter inclined to pick Obama are also more likely to be present in hand voting wards.
+
+### Covariate Adjustment, or Controlling for the covariate
+Compare univariate and covariate outcomes for digital vs hand voting systems
+```{r}
+plot( pObama ~ Dean, newhamp_trt, pch = treatment + 1 )
+abline( h = c( 0.353, 0.353 + 0.042 ), lty = 1:2 )
+abline( 0.221, 0.5229 )
+abline( 0.221 - 0.005, 0.5229, lty = 2 )
+with( newhamp_trt, segments( Dean[ matches$matches[ ,1 ] ], 
+                             pObama[ matches$matches[ ,1 ] ],
+                             Dean[ matches$matches[ ,2 ] ],
+                             pObama[ matches$matches[ ,2 ] ] ) )
+```
+
+### Qualitative Support for Causation
+
+* Strenth - large effects
+* Consistency - similar effect found in other studies
+* Specificity - 
+* Temporality - consistent direction of effect
+* Gradient - linear relationship
+* Plausibility - does it make sense
+* Experiment
+
+
+## Categorical Predictors
 
 <br><br><br>
