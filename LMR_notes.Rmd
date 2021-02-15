@@ -24,6 +24,8 @@ library( gclus )
 library( asbio )
 library( retistruct )
 library( Matching )
+library( MASS )
+library( ellipse )
 ```
 
 ## Introduction
@@ -739,6 +741,147 @@ for (i in 1:nreps ) {
 mean( fstats > gala_mod_2_sum$fstatistic[1] )
 ```
 
+### Sampling
+a finite population from which we draw a simple random sample that is our data.
+
+### Confidence Intervals for $\beta$
+
+consider our galapagos model:
+```{r}
+sumary( gala_mod )
+```
+
+construct 95% CI for $\beta_{area}$
+```{r}
+tdist <- qt( 0.975, 30-6 ) #t-dist w/ 30-6 degrees of freedom
+c( -0.023938 - tdist * 0.022422, -0.023938 + tdist * 0.022422)
+```
+CIs have a duality with the 2-sided hypothesis tests: if the interval contains zero, this indicates that we cannot reject the null hypothesis. $\beta_{area}$'s CI contains 0, therefore we cannot reject the null hypothesis.
+
+```{r}
+c( -0.074805 - tdist * 0.0177, -0.074805 + tdist * 0.0177)
+```
+$\beta_{adjacent}$'s CI does not, so we can reject the null hypothesis.
+
+We can quickly find the CI for all feature variables in the model:
+```{r}
+confint( gala_mod )
+```
+
+Confidence Regions:
+```{r}
+plot( ellipse( gala_mod, c( 2,6 ) ), type = 'l', ylim = c(-0.13,0 ) ) #Confidence Ellipse
+points( coef( gala_mod )[2], coef( gala_mod )[6], pch=19 ) #least squares estimate
+abline( v = confint( gala_mod)[2,], lty = 2 ) #confidence intervals
+abline( h = confint( gala_mod)[6,], lty = 2 )
+```
+We can reject the null hypothesis because the origin does not lie within the ellipse
+
+### Bootstrapped Confidence Intervals
+F & t based CIs are convenient, however, they rely on the assumption of normality. Boostrapped CI's are good workaround.
+
+#### Simulation
+Sample the known distribution and compute the estimate. Repeat these steps multiple times and estimate the sampling distribution of $\hat{\beta}$ using the empirical distribution of the generated/simulated $\hat{\beta}$:  
+
+* Generate $\epsilon$ from the known error distribution
+* From $y = X\beta + \epsilon$ from the known $'beta$ and fixed $X$.
+* Compute $\hat{\beta}$.
+
+#### Bootstrap
+Instead of sampling from the true (empirical) data, sample from observed data.  
+Bootstrapping mirrors simulation, but works with the data on hand without making assumptions about it's distribution:  
+
+* Generate $\epsilon^*$ by sampling with replacement from $\hat{\epsilon_1}, \ldots,\hat{\epsilon_n}$
+* Form $y^* = X\hat{\beta} + \epsilon^*$
+* Compute $\hat{\beta}^*$ from $(X,y^*)$
+
+```{r}
+num_boots <- 4000
+coefmat <- matrix( NA, num_boots, 6 )
+resids <- residuals( gala_mod )
+preds <- fitted( gala_mod )
+
+for ( i in 1:num_boots ) {
+  booty <- preds + sample( resids, rep = TRUE )
+  bmod <- update( gala_mod, booty ~ . )
+  coefmat[ i, ] <- coef( bmod )
+}
+
+colnames( coefmat ) <- c( "Intercept", colnames( gala[, 3:7 ] ) )
+coefdf <- data.frame( coefmat )
+CIs <- apply( coefdf, 2, function( x ) quantile( x, c( 0.025, 0.975 ) ) )
+CIs
+```
+let's remind ourselves of the CIs computed with normal distribution theory:
+```{r}
+confint( gala_mod )
+```
+the CIs are not identical but are comparable.  
+
+Now take a look at some of the bootstrapped distributions and the CIs:
+```{r}
+CIs
+pA <- ggplot( coefdf, aes( x = Area ) ) + geom_density() + 
+  geom_vline( xintercept = c( CIs[ 1,2 ], CIs[ 2,2 ] ), lty = 2 )
+pE <- ggplot( coefdf, aes( x = Elevation ) ) + geom_density() + 
+  geom_vline( xintercept = c( CIs[ 1,3 ], CIs[ 2,3 ] ), lty = 2 )
+pN <- ggplot( coefdf, aes( x = Nearest ) ) + geom_density() + 
+  geom_vline( xintercept = c( CIs[ 1,4 ], CIs[ 2,4 ] ), lty = 2 )
+pS <- ggplot( coefdf, aes( x = Scruz ) ) + geom_density() + 
+  geom_vline( xintercept = c( CIs[ 1,5 ], CIs[ 2,5 ] ), lty = 2 )
+pAd <- ggplot( coefdf, aes( x = Adjacent ) ) + geom_density() + 
+  geom_vline( xintercept = c( CIs[ 1,6 ], CIs[ 2,6 ] ), lty = 2 )
+
+grid.arrange( pA, pE, pN, pS, pAd )
+```
+The distributions are all roughly normal. However, this is not always the case
+
+
+### Exercise 3.4
+Using `sat` data:
+
+a) Fit a model with total sat score as the response and expend, ratio and salary as predictors. Test the hypothesis that $\beta_{salary}$ = 0. Test the hypothesis that $\beta_{salary}$ = $\beta_{ratio}$ = $\beta_{expend}$ = 0. Do any of these predictors have an effect on the response?
+
+```{r}
+sat_sub <- sat %>% dplyr::select( c( total, expend, ratio, salary, takers ) )
+dta <- sat_sub
+dta.r <- abs(cor(dta)) # get correlations
+dta.col <- dmat.color(dta.r) # get colors
+# reorder variables so those with highest correlation
+# are closest to the diagonal
+dta.o <- order.single(dta.r)
+cpairs(dta, dta.o, panel.colors=dta.col, gap=.5,
+main="Matrix plot of features" )
+```
+
+```{r}
+sat_mod <- lm( total ~ expend + ratio + salary, data = sat )
+sumary( sat_mod )
+confint( sat_mod )
+```
+We cannot reject the null hypotheses as these predictors all include 0 within thier confidence intervals and do not have a statistically significant effect on the response.
+
+b) Now add takers to the model. Test the hypothesis that $\beta_{takers}$ = 0. Compare this model to the previous one using an F-test. Demonstrate that the F-test and t-test here are equivalent.
+
+```{r}
+sat_mod2 <- lm( total ~ expend + ratio + salary + takers, data = sat )
+sum2 <- sumary( sat_mod2 )
+sum2
+confint( sat_mod2)
+```
+We can reject the null hypothesis that $\beta_{takers} = 0$, because $\beta_{takers}$'s CI does not span 0.
+
+```{r}
+sat_anova <- anova( sat_mod, sat_mod2 )
+sat_anova
+```
+The p-value indicates that we can reject the null hypothesis and conclude that the addition of `takers` to the model leads to a statistically significant difference in the models ability to describe the variance in the data. Additionally, we can see that the F-statistic from the anova is equivalent to the t-test for takers in the summary of the linear model:
+```{r}
+sat_anova$`Pr(>F)`[2] == sum2$coefficients[5,4]
+```
+
+
+
 ## Prediction
 Prediction is one of the main uses for regression models. However, a point estimate is not the end of the story. It is as important to consider the uncertainty of the estimate so that we may understand the range of expected outcomes. Projections are not useful without a realistic estimate of uncertainty because we need to make sensible plans for when events do not turn out as well as predicted. 
 
@@ -784,6 +927,7 @@ if we are predicting the mean body fat for all men that have mean characteristic
 ```{r}
 predict( fatmod, newdata = data.frame( t( meanMan ) ), interval = 'confidence' )
 ```
+
 #### Extrapolation
 the further away the values are from the original data, the more uncertainty there is in the estimations.  
 Compare the intervals calculated below with those for the mean 'typical' body metrics:
@@ -855,8 +999,94 @@ paste( 'The Autoregression Mod predicts', round( exp( next_month_res[1] ),0),
 * Black swans: might not have enough data to properly describe the distribution
 
 
+### Exercise 4.5
+```{r}
+#the full model
+#fatmod
+sumary( fatmod )
+```
+#short model
+```{r}
+fatmod_4 <- lm( brozek ~ age + weight + height + abdom, fat )
+sumary( fatmod_4 )
+```
+
+a) Is it justifiable to use the smaller model?
+```{r}
+anova( fatmod, fatmod_4 )
+```
+There is a statistically significant difference between the amount of variance accounted for by the two models. The smaller model does not describe the data as well.
+
+b) Compute a 95% prediction interval for median predictor values and compare to the results to the interval for the full model. Do the intervals differ by a practically important amount?
+```{r}
+medvals <- model.matrix( fatmod_4 )
+medvals0 <- apply( medvals, 2, median )
+#95% prediction interval for the median predictor values
+predict( fatmod_4, newdata = data.frame( t( medvals0 ) ), interval = 'prediction' )
+```
+```{r}
+#CI for the full model
+predict( fatmod, newdata = data.frame( t( x0 ) ), interval = 'prediction' )
+```
+No, the intervals don't seem to differ by an appreciable amount. So, in moving to the smaller, simpler model, we don't seem to lose a lot of predictive power.
+
+c) For the smaller model, examine all the observations from case numbers 25 to 50. Which two observations seem particularly anomalous?
+```{r}
+fatmod_4_aug <- augment( fatmod_4 )
+fatmod_4_aug_sub <- fatmod_4_aug[25:50,]
+#fatmod_4_aug_sub
+ggplot( aes( x = .fitted ), data = fatmod_4_aug_sub ) + geom_dotplot()
+
+#plot the model predictors for observation 25:50
+fat %>%
+  dplyr::select( c( age, weight, height, abdom ) ) %>%
+  pivot_longer( cols = everything(), names_to = 'predictor', values_to = 'val' ) %>%
+  ggplot( aes( x = predictor, y = val ) ) +
+  geom_boxplot() +
+  ggtitle( 'Observations 25:50: Predictive Features' )
+```
+
+```{r}
+outliers <- function(dataframe){
+dataframe %>%
+    select_if(is.numeric) %>% 
+    map(~ boxplot.stats(.x)$out) 
+}
+
+fatsub <- fat[25:50,]
+fat4 <- fatsub %>%
+  dplyr::select( c( age, weight, height, abdom ) )
+fat4out <- outliers( fat4 )
+fat4out
+```
+from the output above, find the observation indices:
+```{r}
+#39, 42, 39
+fat %>% filter( weight == c( 363.15 ) )
+fat %>% filter( height == c( 29.5 ) )
+fat %>% filter( weight == c( 148.1 ) )
+```
+
+
+d) Recompute the 95% prediction interval for median predictor values after these two anomalous cases have been excluded from the data. Did this make much difference to the outcome?
+
+remove the two offending records: 39 & 42
+```{r}
+drop <- c( 39, 42 )
+fat_remove2 <- fat[ -drop, ] 
+fatmod_remove2_4 <- lm( brozek ~ age + weight + height + abdom, fat_remove2 )
+medvals2 <- model.matrix( fatmod_remove2_4 )
+medvals02 <- apply( medvals2, 2, median )
+#95% prediction interval for the median predictor values
+predict( fatmod_remove2_4, newdata = data.frame( t( medvals02 ) ), interval = 'prediction' )
+predict( fatmod_4, newdata = data.frame( t( medvals0 ) ), interval = 'prediction' )
+```
+The CI narrows when the 2 outliers are removed, but is it significant?
+
+
 ## Explanation
 The relationships between variables. can include causal conclusions, however these require more rigor.
+
 
 ### Simple Meaning
 a simple interpretation of model coefficients: *unit increase in $x_1$ with the other predictors help constant will produce a change of $\hat{\beta_1}$ in the response variable $y$.* This is conceptually difficult: IRL there is no way to hold these variables constant to observe the model's effects and it is not likely that the model captures all contributing variables to the system. Furthermore, our model's explanation contains no notion of explanation.
@@ -968,7 +1198,298 @@ with( newhamp_trt, segments( Dean[ matches$matches[ ,1 ] ],
 * Plausibility - does it make sense
 * Experiment
 
+### Exercise 5.2
+
+Use the `odor` dataset with odor as the response and temp as a predictor. Consider all possible models that also include all, some or none of the other two predictors. Report the coefficient for temperature, its standard error, t-statistic and p-value in
+each case. Discuss what stays the same, what changes and why. Which model is best?
+
+```{r}
+data( odor )
+glimpse( odor )
+```
+
+```{r}
+dta <- odor
+dta.r <- abs(cor(dta)) # get correlations
+dta.col <- dmat.color(dta.r) # get colors
+# reorder variables so those with highest correlation
+# are closest to the diagonal
+dta.o <- order.single(dta.r)
+cpairs(dta, dta.o, panel.colors=dta.col, gap=.5,
+main="Matrix plot of features" )
+```
+
+
+```{r}
+mod_stem <- 'odor ~ temp'
+mod_set <- c(  '+ gas', '+ pack', '+ gas + pack' )
+mod <- c()
+mod_tempc <- c()
+mod_se <- c()
+mod_t <- c()
+mod_p <- c()
+
+for ( m in 1:length( mod_set ) ) {
+  mod_str <- paste( mod_stem, mod_set[ m ] )
+  mod[ m ] <- mod_str
+  modfitsum <- summary( lm( mod_str, odor ) )
+  mod_tempc[ m ] <- modfitsum$coefficients[ 2,1 ]
+  mod_se[ m ] <- modfitsum$coefficients[ 2,2 ]
+  mod_t[ m ] <- modfitsum$coefficients[ 2,3 ]
+  mod_p[ m ] <- modfitsum$coefficients[ 2,4 ]
+}
+
+modfitsum
+```
+
+
+```{r}
+odor_mods_df <- data.frame( 'mod' = mod, 
+                            'temp_coef' = mod_tempc, 
+                            'temp_se' = mod_se,
+                            'temp_t' = mod_t,
+                            'temp_pval' = mod_p )
+glimpse( odor_mods_df )
+```
+Temperature does not have a statistically significant impact on the model's ability to describe the variability of the data. This does not change with the addition of other predictive features to the model as shown by the temperature feature's p-value. The standard error gets smaller with other terms included whereas the t-stat get larger in magnitude where both gas + pack are included as opposed to just one added.
+
 
 ## Categorical Predictors
+Categorical features / predictors - qualitative as opposed to quantitative values
 
+### A 2-level factor
+```{r}
+data( sexab )
+glimpse( sexab )
+by( sexab, sexab$csa, summary )
+```
+
+```{r}
+boxp <- ggplot( sexab, aes( x = csa, y = ptsd ) ) +
+  geom_boxplot()
+scatp <- ggplot( sexab, aes( x = cpa, y = ptsd, color = csa ) ) +
+  geom_point( show.legend = FALSE )
+
+grid.arrange( boxp, scatp, ncol = 2 )
+```
+those in the abused group have higher rates as the not abused group.  
+run a t-test to evaluate the statistical significance of this
+
+```{r}
+t.test( ptsd ~ csa, sexab, var.equal = TRUE )
+```
+
+use dummy variables to recode the 2-level feature variable
+```{r}
+sexab %>% mutate( dummy = case_when( csa == 'Abused' ~ 1,
+                                     csa == 'NotAbused' ~ 0 ) ) %>%
+  do( tidy( lm( ptsd ~ dummy, . ) ) )
+```
+```{r}
+smod <- lm( ptsd ~ csa, sexab )
+summary( smod )
+```
+the intercept ( 11.9 ) is the mean response for the reference level. the csaNotAbused estimate is the difference between levels  
+if it is more intuitive the other way, can rereference the model:
+```{r}
+sexab$csa <- relevel( sexab$csa, ref = 'NotAbused' )
+lmod <- lm( ptsd ~ csa, sexab )
+summary( lmod )
+```
+
+### Factors and Quantitative Predictors
+models that can express how a factor variable and a quantitative variable might be related to a response
+consider modeling the sexual abuse model to include the physical abuse term `cpa`
+```{r}
+sexmod1 <- lm( ptsd ~ cpa + csa + cpa:csa, sexab )
+summary( sexmod1 )
+```
+
+we can see that the interaction term is not significant, so we simplify the model
+```{r}
+sexmod2 <- lm( ptsd ~ cpa + csa, sexab )
+summary( sexmod2 )
+```
+visualize the data with parallel regression lines
+```{r}
+group.colors <- c( Abused = 'red', NotAbused = 'blue')
+ggplot( aes( x = cpa, y = ptsd, color = csa ), data = sexab ) +
+  geom_point() +
+  geom_abline( slope = sexmod2$coefficients[2], 
+               intercept = sexmod2$coefficients[1], color = 'blue' ) +
+  geom_abline( slope = sexmod2$coefficients[2], 
+               intercept = sexmod2$coefficients[1] +
+                 sexmod2$coefficients[3], color = 'red' ) +
+  scale_color_manual(values=group.colors)
+```
+a simple check of the residuals for model diagnostics
+```{r}
+sexmod2_aug <- augment( sexmod2 )
+ggplot( aes( x = .fitted, y = .resid, color = csa ), data = sexmod2_aug ) +
+  geom_point() +
+  scale_color_manual(values=group.colors)
+```
+We can see that there is no clear trend in the residuals and the variance of the two groups is approximately the same.
+
+### Interpretation with Interaction Terms
+```{r}
+data( whiteside )
+glimpse( whiteside )
+```
+```{r}
+ggplot( aes( x = Temp, y = Gas ), data = whiteside ) +
+  geom_point() + 
+  facet_grid( ~ Insul ) +
+  geom_smooth( method = 'lm' )
+```
+
+gas consumption is temperature dependent both before and after installing the insulation. However, less gas is used after installation.
+
+Explore the interaction of temperature:
+```{r}
+whitehouse_mod <- lm( Gas ~ Temp*Insul, whiteside )
+summary( whitehouse_mod )
+```
+From this model we can say that the average consumption before insulation at 0dC was 6.85. This makes interpretation complicated, because 0dC is at the low end extreme of the dataset. We can recenter the temperature predictor to account for this:
+```{r}
+whiteside$ctemp <- whiteside$Temp - mean( whiteside$Temp )
+whiteside_mod <- lm( Gas ~ ctemp * Insul, whiteside )
+summary( whiteside_mod )
+```
+
+Centering for mean Temp gives a more natural interpretation to the coefficients: The average consumption before insulation at the average temperature was 4.94 before insulation and 4.94-1.57= 3.37dC after installing the insulation. 
+
+### Factors with more than 2 levels
+Consider an experiment with 5 different treatment groups:
+```{r}
+data( fruitfly )
+glimpse( fruitfly )
+```
+visualize longevity ~ thorax for all 5 groups
+```{r}
+ggplot( aes( x = thorax, y = longevity, color = activity ), data = fruitfly ) +
+  geom_point()
+```
+plot as a facet-wrap:
+```{r}
+ggplot( aes( x = thorax, y = longevity, color = activity ), data = fruitfly ) +
+  geom_point() +
+  facet_wrap( ~ activity )
+```
+fit a linear model
+```{r}
+fruitfly_mod <- lm( longevity ~ thorax * activity, fruitfly )
+sumary( fruitfly_mod )
+```
+```{r}
+plot( fruitfly_mod )
+```
+
+```{r}
+anova( fruitfly_mod )
+```
+We can see that the interaction term `thorac:activity` is not significant, so we can refit the model without this term:
+```{r}
+fruitfly_mod2 <- lm( longevity ~ thorax + activity, fruitfly )
+```
+But do we need both `thorax` and `activity`? Need to evaluate the model with just `thorax` first:
+```{r}
+drop1( fruitfly_mod2, test='F' )
+```
+The `drop1()` command tests each term relative to the full model.
+```{r}
+sumary( fruitfly_mod2 )
+```
+```{r}
+plot( fruitfly_mod2 )
+```
+
+From the 'Residuals ~ Fitted` plot, we see some heteroscedasticity which can be addressed with a log transformation:
+```{r}
+fruitfly_mod3 <- lm( log( longevity ) ~ thorax + activity, fruitfly )
+plot( fruitfly_mod3 )
+```
+
+```{r}
+sumary( fruitfly_mod3 )
+```
+```{r}
+exp( coef(fruitfly_mod3))
+```
+Daaaaammmmn. The high sexual activity group was found to have a shorter lifespan.
+
+### Alternative Codings of Qualitative Predictors
+consider a four-level factor coded with 3 dummy factors.
+
+**Treatment Coding**
+```{r}
+contr.treatment( 4 )
+```
+**Helmert Coding**
+```{r}
+contr.helmert( 4 )
+```
+
+**Sum Coding**
+```{r}
+contr.sum( 4 )
+```
+
+
+### Exercise 14.2
+Using the 'infmort' data, find a simple model for the infant mortality in terms of the other variables. Be alert for transformations and unusual points. Interpret your model by explaining what the regression parameter estimates mean.
+```{r}
+data( infmort )
+glimpse( infmort )
+```
+```{r}
+region <- ggplot( infmort, aes( x = region, y = mortality ) ) +
+  geom_boxplot( )
+oil <- ggplot( infmort, aes( x = oil, y = mortality ) ) +
+  geom_boxplot( )
+income <- ggplot( infmort, aes( x = log(income), y = mortality, color = region ) ) +
+  geom_point( )
+income2 <- ggplot( infmort, aes( x = log(income), y = mortality, color = oil ) ) +
+  geom_point( )
+grid.arrange( region, oil, income, income2, ncol = 2)
+```
+
+
+perform an AIC-based backward selection
+```{r}
+#make our full model to work backwards from:
+infmort_full <- lm( mortality ~ log( income ) + oil + region, data = infmort )
+summary( infmort_full )
+```
+
+we see from the plots that there are several high leverage point on the graphs. here we identify them & remove from the data
+```{r}
+HighLeverage <- cooks.distance(infmort_full) > (4/nrow(infmort))
+infmort[ HighLeverage, ]
+```
+```{r}
+#remove high leverage points
+infmort_filt <- infmort[ !HighLeverage, ]
+#refit full model:
+infmort_full <- lm( mortality ~ log( income ) + oil + region, data = infmort_filt )
+summary( infmort_full )
+```
+
+
+```{r}
+infmort_backwards <- step( infmort_full, direction = 'backward', trace = 1 )
+```
+```{r}
+summary( infmort_backwards )
+```
+I tried this before filtering the high leverage points and the backwards regression fits had dropped income. It looks like there were several high leverage countries with high income and oil exports that had high infant mortality rates. However, if these observations are filtered then income becomes important to the model. Additionally, if income is not modeled on a log scale, it is dropped when evaluating by AIC.  
+
+Now trying to drop by F-test:
+```{r}
+drop1( infmort_full, test = 'F' )
+```
+```{r}
+summary( infmort_full )
+```
+the intercept estimate gives the models estimate for mortality rate if the polity is an oil exporting in Africa. Given the same income and region, a non oil exporting country can expect an infant mortality rate ~-165 less. If income and oil exporting status is controlled for, regions in Europe, Asia & the Americas can expect a lower infant mortality rate than  Arican countries by the Estimates given (-86, -47, -83 respectively).  
 <br><br><br>
