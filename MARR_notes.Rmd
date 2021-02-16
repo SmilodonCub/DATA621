@@ -383,6 +383,162 @@ cat( res, sep = '\n' )
 ```
 A value of 0% is well within the CI for the expected value of Y given X=4. Therefore, with only this data, there is no statistical significance to support a negative relationship between changes in housing prices and percentages of overdue loans.
  
+### Inferences about the Slope and Intercept
+find confidence intervals for hypothesis tests about either the slope of the intercept of a regression line.  
+
+We need to make some assumptions:  
+
+* The relationship between the response and predictor is linear
+* the errors are independent
+* the errors are normally distributed.
+
+intercept
+$$\hat{\beta}_0 = y - \hat{\beta}_1\bar{x}$$
+slope
+$$\hat{\beta}_1 = \frac{SXY}{SXX}$$
+where:  
+* **SXY**: the sum of the product of the difference of xs and the mean and the difference of ys and their means
+* **SXX**: the sum of squares of the differences between each x and their mean
+
+we can also write that
+$$\hat{\beta}_1 = \frac{x_i-\bar{x}}{SXX}$$
+from this emerge 3 useful relations:
+
+1)
+$$E(\hat{\beta}_1|X) = \hat{\beta}_1$$
+
+2)
+$$Var(\hat{\beta}_1|X) = \frac{\sigma^2}{SXX}$$
+
+3)
+$$\hat{\beta}_1|X \sim N \left( \hat{\beta}_1, \frac{\sigma^1}{SXX} \right)$$
  
+find a 95% Confidence Interval for the production example:
+```{r}
+glimpse( production_df )
+summary( mod )
+```
+```{r}
+confint( mod )
+```
+ can find manually:
+```{r}
+#for the slope
+#from the summary( mod ) output
+modsum <- summary( mod )
+slope <- modsum$coefficients[ 2,1 ]
+SE_slope <- modsum$coefficients[ 2,2 ]
+n <- nrow( production_df )
+tdist<- qt( 0.025, n-2 )
+CI <- c( slope - tdist*SE_slope, slope + tdist*SE_slope )
+CI
+```
  
+```{r}
+#for the intercept
+int <- modsum$coefficients[ 1,1 ]
+SE_int <- modsum$coefficients[ 1,2 ]
+n <- nrow( production_df )
+tdist<- qt( 0.025, n-2 )
+CI <- c( int - tdist*SE_int, int + tdist*SE_int )
+CI
+```
+
+### Confidence Intervals for the Population Regression Line
+$$E(Y|X = x^*) = \hat{\beta}_0 + \hat{\beta}_1x^* = y^*$$
+ this leads to 
+ $$Var(\hat{y}^*) = \sigma^2 \left( \frac{1}{n} + \frac{x^* - \bar{x}}{SXX} \right)$$
+
+### Prediction Intervals for the Actual Value of Y
+finding a prediction interval for the actual value of Y at $x^*$, a given value of X.  
+
+* $E(Y|X = x^*)$ the expected value or average value of Y for a given value $x^*$: this is what you expect, a fixed mean, that lies on the regression line. $E(Y|X = x^*) \neq Y$ because Y can take many values
+* $E(Y|X = x^*) \neq Y^*$. because $Y^*$ can be lots of values and is probably not on the regression line at all.
+* Confidence Intervals are always reported for a parameter. Prediction Intervals are reported for random values ($Y^*$)
+
+Confidence Intervals $\neq$ Prediction Intervals: The variability in the error of predicting a single value of Y will exceed the variability for estimating the expected value of Y, because the prediction must account for the random error $e^*$ of the system.
+
+```{r}
+# compare these CI values.....
+head( predict( mod, interval = 'confidence' ) )
+```
+
+```{r}
+# ....with these PI values:
+head( predict( mod, interval = 'prediction' ) )
+```
+We see that the estimates are the same. However, the interval span is much larger for the prediction than the confidence intervals.
+
+### ANOVA
+To test whether there is a linear association between Y and X, we have to test $H_0 : \beta_1 = 0 \mbox{  against  } H_A: \beta_1 \neq 0$. This can be evaluated with F-test statistic.
+$$F = \frac{\frac{SSreg}{1}}{\frac{RSS}{(n-2)}}$$
+where **SSreg**: sum of squares explained by the regression model (sum of squares of difference of $\hat{y}-\bar{y}$ (the regression est - mean)) 
+**RSS**: residual sum of squares (sum of squares of differences of the observed y and the regression models est $\hat{y}$)
+
+### Dummy Variable Regression
+testing the means of two groups
+
+```{r}
+changeover_df <- read.csv( '/home/bonzilla/Documents/MSDS/DATA621/changeover.txt', sep = '\t', header = TRUE )
+changeover_df <- changeover_df %>%
+  mutate( Method = as.factor( Method ),
+          New = as.factor( New ) )
+glimpse( changeover_df )
+```
+```{r}
+ggplot( changeover_df, aes( x = Method, y = Changeover ) ) +
+  geom_boxplot() +
+  theme_classic() 
+```
+We wish to develop an equation to model the relationship between Changeover and the Method. Does the new method decrease the changeover time?
+
+```{r}
+co_mod <- lm( Changeover ~ Method, data = changeover_df )
+summary( co_mod )
+```
+We wish to test whether the coefficient of the dummy variable is significantly different than 0.
+
+From the model summary output, we see that the t-value is -2.254 and that the p-value is significant at $\alpha = 0.05$. Therefore, there is significant evidence of a reduction in means for the new method.
+
+Find the confidence interval:
+```{r}
+confint( co_mod)
+```
+Note that CI for the New method does not span 0; this means that we can reject the null hypothesis that there is no difference between the means of the old and new methods.
+
+### Exercise 2.3
+The manager of the purchasing department of a large company would like to develop a regression model to predict the average amount of time it takes to process a given number of invoices. Over a 30 day period, data are collected on the number of invoices processed and the total time taken (in hours). The following model was fit to the data: $\mbox{processing time} = \beta_0 + \beta_1 \mbox{#invoices} + \epsilon$ 
+
+```{r}
+invoices_df <- read.csv( '/home/bonzilla/Documents/MSDS/DATA621/invoices.txt', sep = '\t', header = TRUE )
+glimpse( invoices_df ) 
+ggplot( invoices_df, aes( x = Invoices, y = Time ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  theme_classic() +
+  ggtitle( 'Scatterplot of Invoices data' )
+```
+
+
+a) Find a 95% confidence interval for the start-up time, i.e. $\beta_0$
+
+```{r}
+invoices_mod <- lm( Time ~ Invoices, data = invoices_df )
+invoices_sum <- summary( invoices_mod )
+invoices_sum
+confint( invoices_mod )
+```
+
+
+b) Suppose that a best practice benchmark for the average processing time for an additional invoice is 0.01 hours (or 0.6 minutes). Test the null hypothesis against the two-sided alternative. Interpret your result.
+
+The confidence interval for the Invoices coefficient spans the value $\beta_1 = 0.01$. Therefore, we cannot reject the null hypothesis that the relationship is any different that the benchmark
+
+c) Find a point estimate and a 95% prediction interval for the time taken to process 130 invoices.
+
+```{r}
+predict( invoices_mod, newdata = data.frame( 'Invoices' = 130 ), interval = 'confidence' )
+```
+
+
+
 <br><br><br>

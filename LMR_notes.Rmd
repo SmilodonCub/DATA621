@@ -293,7 +293,7 @@ summary( prostate_clean )
 generate a matrix plot ordered by degree of correlation:
 ```{r}
 dta <- prostate_clean %>%
-  select( -c( svi, gleason ) )
+  dplyr::select( -c( svi, gleason ) )
 dta.r <- abs(cor(dta)) # get correlations
 dta.col <- dmat.color(dta.r) # get colors
 # reorder variables so those with highest correlation
@@ -333,7 +333,7 @@ main="Matrix plot of features" )
 Plot the trends for sat scores as a function of expenditure:
 ```{r}
 sat_scores <- sat %>%
-  select( expend, verbal, math ) %>%
+  dplyr::select( expend, verbal, math ) %>%
   pivot_longer( cols = c( verbal, math ), 
                 names_to = 'testcat',
                 values_to = 'score' )
@@ -915,7 +915,7 @@ x0
 
 ```{r}
 fat_select <- fat %>%
-  select( c( age, weight, height, neck, chest, abdom, hip, thigh, knee, ankle, biceps, forearm, wrist ) )
+  dplyr::select( c( age, weight, height, neck, chest, abdom, hip, thigh, knee, ankle, biceps, forearm, wrist ) )
 meanMan <- colMeans( fat_select )
 meanMan
 ```
@@ -1049,7 +1049,7 @@ fat %>%
 ```{r}
 outliers <- function(dataframe){
 dataframe %>%
-    select_if(is.numeric) %>% 
+    dplyr::select_if(is.numeric) %>% 
     map(~ boxplot.stats(.x)$out) 
 }
 
