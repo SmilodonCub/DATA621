@@ -19,6 +19,7 @@ library( ggplot2 )
 library( gridExtra )
 library( tidyverse )
 library( gclus )
+library( car )
 ```
 
 ## Introduction
@@ -539,6 +540,229 @@ c) Find a point estimate and a 95% prediction interval for the time taken to pro
 predict( invoices_mod, newdata = data.frame( 'Invoices' = 130 ), interval = 'confidence' )
 ```
 
+## Diagnostics and Transformations for Simple Linear Regression
+
+Numerical regression output should always be supplemented by an analysis to ensure that an appropriate model has been fitted to the data.  
+
+**Residuals**: using plots of residuals to determine whether the proposed regression model is a valid model. If a linear model is appropriate, the residuals should resemble random errors; there should be no pattern. If the residuals vary with respect to x, then this indicates that an incorrect model has been fit.
+
+### Regression Diagnostics: Tools for checking the validity of a model.
+
+* Is the model valid?: does the model fit the data. use plots of standardized residuals
+* Are there any data points with unusually large leverage?
+* Are any of the data points extreme outliers?
+* If a leverage point exists, is it a bad one?
+* Is the assumption of constant variance of the errors reasonable?
+* If the data are collected over time, examine whether the data are correlated over time.
+* Is the assumption that the errors are normally distributed reasonable?
+
+#### Leverage Points
+**Leverage Points**: data which exercise considerable influence on the fitted model
+
+a look at Huber's good/bad leverage points
+```{r}
+x <- c( -4, -3, -2, -1, 0, 10 )
+YBad <- c( 2.48, 0.73, -0.04, -1.44, -1.32, 0 )
+YGood <- c( 2.48, 0.73, -0.04, -1.44, -1.32, -11.4)
+
+huber <- data.frame( x, YBad, YGood ) %>%
+  pivot_longer( cols = c( YBad, YGood ), names_to = 'Y', values_to = 'val' ) %>%
+  ggplot( aes( x = x, y = val, color = Y  ) ) +
+  geom_point() +
+  geom_smooth( method = 'lm' )
+huber  
+```
+
+In the above plot, x = 10 is a leverage point in both data series: the value of x is far from the other values and the value of Y has a very large effect on the least squares regression line.
+
+Finding a numerical rule to identify leverage points based on (1) the distance of x is away from the bulk of the x's and (2) the extent to which the fitted regression line is attracted to a given point.  
+$$\mbox{Leverage } \rightarrow h_{ii} = \frac{1}{n}+\frac{(x_i - \bar{x})^2}{\sum_{j=1}^n(x_j-\bar{x})^2}$$
+**The Rule**: classify $x_i$ as a point of hight leverage in a simple linear regression model if:
+$$h_{ii} \gt 2 \cdot average( h_{ii} ) = 2 \cdot \frac{2}{n} = \frac{4}{n}$$
+
+Strategies for dealing with Bad leverage points:  
+
+* Remove invalid data points
+* Fit a different regression model
+
+Standardize Residuals: divide the residuals by an estimate of the standard deviation
+$$r_i = \frac{\hat{e}_i}{s \sqrt{1-h_{ii}}}$$
+where s = $\sigma$  
+**Common Practice**: label points as outliers in small/moderate datasets if the point falls outside the interval of -2 to 2 standard deviations out. Otherwise, for large datasets, use the range -4 to 4.  
+*Identification and examination of any outliers is a key part of regression analysis*
+
+**Bad Leverage pnt**: a leverage point whose standardized residual is outside -2 to 2  
+**Good Leverage pnt**: a leverage point whose standardized residual is inside the interval -2 to 2  
+
+a relatively small number of outlying points can have a relatively large effect on the fitted model. 
+```{r}
+path <- '/home/bonzilla/Documents/MSDS/DATA621/bonds.csv'
+bonds <- read.csv( path, sep = '\t' )
+glimpse( bonds )
+```
+
+```{r}
+ggplot( bonds, aes( x = CouponRate, y = BidPrice ) ) +
+  geom_point() +
+  geom_smooth( method = 'lm' )
+```
+
+The linear model doesn't do a great job here. However, this is largely because of the influence of three data points to the left.
+```{r}
+bonds_mod <- lm( BidPrice ~ CouponRate, bonds )
+standard_res <- rstandard( bonds_mod )
+bonds$standard_res <- standard_res
+
+ggplot( bonds, aes( x = CouponRate, y = standard_res ) ) +
+  geom_point() +
+  geom_hline( yintercept = -2, color = 'blue' ) +
+  geom_hline( yintercept = 2, color = 'blue' )
+```
+As it turns out, the 3 points to the left are 'flower' bonds, which can be justifiably treated differently from the rest of the data set.  
+* Points should not be routinely deleted from an analysis just because they do not fit the model
+* Outliers often point out an important feature of the problem not considered before.
+
+**Cook's Distance**: multiply the quantities: square of the ith standardized residual * 2 x a monotonic function that increases as the ith leverage value increases
+use the recommended cut-off value of $\frac{4}{n-2}$
+```{r}
+bonds_cooks <- cooks.distance( bonds_mod )
+bonds$cooks <- bonds_cooks
+
+ggplot( bonds, aes( x = CouponRate, y = cooks ) ) +
+  geom_point() +
+  geom_hline( yintercept = 4/(35-2), color = 'blue' )
+```
+
+#### Constant Variance
+Does the errors/residuals have constant variance?  
+Ignoring nonconstant variance when it exists invalidates all inferential tools (pvals, CIs etc)
+```{r}
+cleaning_df <- read.csv( '/home/bonzilla/Documents/MSDS/DATA621/cleaning.csv', sep = '\t', header = TRUE )
+glimpse( cleaning_df )
+```
+```{r}
+ggplot( cleaning_df, aes( x = Crews, y = Rooms ) ) +
+  geom_point() +
+  geom_smooth( method = 'lm', se = F ) +
+  theme_classic()
+```
+```{r}
+cleaning_mod <- lm( data = cleaning_df, Rooms ~ Crews )
+aug_cleaning_mod <- augment( cleaning_mod )
+p1 <- ggplot( aug_cleaning_mod, aes( x = Crews, y = .std.resid) ) +
+  geom_point() +
+  theme_classic()
+p1
+plot( cleaning_mod )
+```
+The standardized residuals x X does not have constant variance. Will see how to deal with this next section
+
+
+### Transformations
+How to use transformations to overcome problems due to non-constant variance and/or nonlinearity.
+
+When both Y and X are measured in the same units then it is often natural to consider the same transformation for both X and Y.
+```{r}
+sqmod <- lm( data = cleaning_df, sqrt(Rooms) ~ sqrt(Crews) )
+aug_sqmod <- augment( sqmod )
+glimpse( aug_sqmod )
+```
+```{r}
+p1 <- ggplot( aug_sqmod, aes( x = `sqrt(Crews)`, y = `sqrt(Rooms)`) ) +
+  geom_point() +
+  geom_smooth( method = 'lm', se = F ) +
+  theme_classic()
+p2 <- ggplot( aug_sqmod, aes( x = `sqrt(Crews)`, y = .std.resid) ) +
+  geom_point() +
+  theme_classic()
+
+grid.arrange( p1, p2, ncol = 2 )
+```
+
+Note that the standardized residuals do not have the funnel shape they took on last section
+
+```{r}
+plot( sqmod )
+```
+ 
+#### Using Logarithms to estimate percentage effects
+
+```{r}
+path <- '/home/bonzilla/Documents/MSDS/DATA621/confood1.csv'
+confood1 <- read.csv( path, sep = '\t' )
+glimpse( confood1 )
+```
+```{r}
+ggplot( confood1, aes( x = Price, y = Sales ) ) +
+  geom_point() +
+  geom_smooth( method = 'lm', se = F) +
+  theme_classic()
+```
+
+When studying the relationship between price and quantity in economics, it is common practice to take the logarithms of both since interest lies in predicting the effect of a 1% increase in price on quantity sold:
+$$log(Q) = \beta_0 + \beta_1 log(P) + \epsilon$$
+Here the slope of the model approximately equals the ratio of the percentage changes in Q & P. (Price Elasticity)
+```{r}
+ggplot( confood1, aes( x = log(Price), y = log(Sales ) ) ) +
+  geom_point() +
+  geom_smooth( method = 'lm', se = F) +
+  theme_classic()
+```
+
+#### Using transformations to overcome problems due to nonlinearity:
+Inverse response plots and Box-Cox procedures  
+
+3 scenarios:  
+
+* Response variable needs to be transformed
+
+```{r}
+path <- '/home/bonzilla/Documents/MSDS/DATA621/restrans.csv'
+restrans <- read.csv( path, sep = '\t' )
+ggplot( restrans, aes( x = x, y = y ) ) +
+  geom_point() +
+  theme_classic()
+restrans_mod <- lm( data = restrans, y ~ x )
+plot( restrans_mod )
+```
+
+plainly obviously not a linear model candidate
+```{r}
+inverseResponsePlot( restrans_mod, lambda = c(0, 0.33, 1), 
+    robust=FALSE, xlab=NULL, id=FALSE )
+```
+
+Transform a response variable using the Box-Cox method: the box-cox procedure aims to find the transform that makes the transformed variable close to normally distributed.  
+
+```{r}
+restrans_mod_trans <- lm( data = restrans, y^(1/3) ~ x )
+restrans_mod_trans_aug <- augment( restrans_mod_trans )
+glimpse( restrans_mod_trans_aug )
+
+ggplot( restrans_mod_trans_aug, aes( x = x, y = `y^(1/3)`)) +
+  geom_point() +
+  geom_smooth( method = 'lm', se = F ) +
+  theme_classic()
+```
+
+Check out how damn linear the dataseries is after the transform.  
+Next visualize the diagnostics:
+```{r}
+plot( restrans_mod_trans )
+```
+
+
+* Predictor variable needs to be transformed
+again, consider scaled power transformations.  
+Also, considering only transforming only X, so fitting models of the form:  
+$E(Y|X=x) = \alpha_0 + ]\alpha_1 \psi_S(x,\lambda)$
+
+
+* both response and predictor need to be transformed
+Multivariate generalization of the Box-Cox transformation method
+
+How To Think About It:
+![](/home/bonzilla/Documents/MSDS/DATA621/logicflow.png)
 
 
 <br><br><br>

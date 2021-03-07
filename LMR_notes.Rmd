@@ -26,6 +26,8 @@ library( retistruct )
 library( Matching )
 library( MASS )
 library( ellipse )
+library( lmtest )
+library( splines )
 ```
 
 ## Introduction
@@ -1492,4 +1494,453 @@ drop1( infmort_full, test = 'F' )
 summary( infmort_full )
 ```
 the intercept estimate gives the models estimate for mortality rate if the polity is an oil exporting in Africa. Given the same income and region, a non oil exporting country can expect an infant mortality rate ~-165 less. If income and oil exporting status is controlled for, regions in Europe, Asia & the Americas can expect a lower infant mortality rate than  Arican countries by the Estimates given (-86, -47, -83 respectively).  
+
+## Diagnostics
+Regression Diagnostics: there are several assumptions made when applying linear models, and diagnostic methods are used to determine if those assumptions are met before a model is deployed into the wild. Model building is an iterative process, and model diagnostics can often highlight aspects that need adjustment.    
+
+potential issues with model assumptions:  
+
+* **Error** - we assume that errors are independent and normally distributed
+* **Model** - we have assumed that structurally the data supports a linear relationship
+* **Unusual Observations** - it only takes a few extreme outliers to throw off a model
+
+### Checking Error Assumptions
+**Constant Variance**  
+we need to check if variance of the residuals is relate to a feature of the model. the most useful diagnostic is to check the residuals as a function of $\hat{y}$. if all is well, you should see constant symmetrical variation in the distribution. **homoscedasticity**: when there is nonconstant variance.  
+
+an example:
+```{r}
+data( savings )
+savings_mod <- lm( sr ~ pop15 + pop75 + dpi + ddpi, data = savings )
+savings_mod_aug <- augment( savings_mod )
+#glimpse( savings_mod_aug )
+
+p1 <- ggplot( savings_mod_aug, aes( x = .fitted, y = .resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  theme_classic()
+p2 <- ggplot( savings_mod_aug, aes( x = .fitted, y = sqrt( abs( .resid ) ) ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  ylab( expression( sqrt( hat( epsilon )))) +
+  theme_classic()
+  
+grid.arrange( p1, p2, ncol = 2 )
+```
+Both plots are satisfactory. Next a numeric test can next be applied to evaluate constant variance:
+```{r}
+sumary( lm( sqrt( abs( savings_mod_aug$.resid)) ~ savings_mod_aug$.fitted ) )
+```
+
+there is no obvious slope to the model summary output. the two visualizations look satisfactory, so we can assume that the assumption of constant variance for the residuals (error) is relatively constant.  
+
+The following plot shows some simulated distributions to give examples of things to look out for in data
+```{r}
+par(mfrow=c(2,2))
+n <- 500
+for(i in 1:1) {x <- runif( n ) ; plot( x, rnorm( n ), title( 'Constant Variance' )) }
+for(i in 1:1) {x <- runif( n ) ; plot( x, x*rnorm( n ), title( 'Strong NonConstant Variance' )) }
+for(i in 1:1) {x <- runif( n ) ; plot( x, sqrt((x))*rnorm( n ), title( 'Mild NonConstant Variance' )) }
+for(i in 1:1) {x <- runif( n ) ; plot( x, cos(x*pi/0.5)+rnorm( n,sd=1 ), title( 'NonLinearity' )) }
+```
+
+now to look at the residuals as a function of a few of the predictor variables:
+```{r}
+p1 <- ggplot( savings_mod_aug, aes( x = pop15, y = .resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  ggtitle( 'pop15' ) +
+  theme_classic()
+p2 <- ggplot( savings_mod_aug, aes( x = pop75, y = .resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  ggtitle( 'pop75' ) +
+  theme_classic()
+p3 <- ggplot( savings_mod_aug, aes( x = dpi, y = .resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  ggtitle( 'dpi' ) +  
+  theme_classic()
+p4 <- ggplot( savings_mod_aug, aes( x = ddpi, y = .resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  ggtitle( 'ddpi' ) +
+  theme_classic()
+  
+grid.arrange( p1, p2, p3, p4, ncol = 2 )
+```
+The variance appear constant for `pop75`, but for `pop15` appears to have two groups
+
+transformations can be applied to distributions to even out signs of non-constant variance
+ex: refit the model with a square root transformation of `dpi` and `ddpi`. then look at the residual plots again:
+```{r}
+savings_mod2 <- lm( sr ~ pop15 + pop75 + sqrt(dpi) + sqrt(ddpi), data = savings )
+savings_mod_aug2 <- augment( savings_mod2 )
+glimpse( savings_mod_aug2 )
+p1 <- ggplot( savings_mod_aug2, aes( x = pop15, y = .std.resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  ggtitle( 'pop15' ) +
+  theme_classic()
+p2 <- ggplot( savings_mod_aug2, aes( x = pop75, y = .std.resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  ggtitle( 'pop75' ) +
+  theme_classic()
+p3 <- ggplot( savings_mod_aug2, aes( x = `sqrt(dpi)`, y = .std.resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  ggtitle( 'dpi' ) +  
+  theme_classic()
+p4 <- ggplot( savings_mod_aug2, aes( x = `sqrt(ddpi)`, y = .std.resid ) ) + 
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  ggtitle( 'ddpi' ) +
+  theme_classic()
+  
+grid.arrange( p1, p2, p3, p4, ncol = 2 )
+```
+
+That looks a little more even, but not satisfactory.
+
+### Normality
+Q-Q plots: compare the residuals to the '*ideal*' normal observations
+
+```{r}
+par(mfrow=c(1,2))
+
+qqnorm( savings_mod_aug$.resid, ylab='Residuals',main='')
+qqline( savings_mod_aug$.resid )
+
+hist( savings_mod_aug$.resid, xlab = 'Residuals', main='' )
+```
+normal residuals should follow the line approximately. Here, the residuals look normal.
+
+The Shapiro-Wilk test is a formal test for normality:
+```{r}
+shapiro.test( savings_mod_aug$.resid )
+```
+the $H_0$ is that the residuals are normal. Since the p-value is large, we do not reject the null hypothesis
+
+### Correlated Errors
+```{r}
+data( globwarm, package = 'faraway')
+gw_mod_aug <- augment( lm( nhtemp ~ wusa + jasper + westgreen + chesapeake + tornetrask + urals + mongolia + tasman, globwarm ) )
+gw_mod_aug$year <- seq( 1856, 2000 )
+ggplot( gw_mod_aug, aes( x = year, y = .resid ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_abline( intercept = 0, slope = 0, color = 'red' ) +
+  theme_classic()
+```
+that looks wild. you can see some clear trends for stretches of negative residuals and stretches of positive residuals.
+
+next we check for serial correlation in the data
+```{r}
+n <- length( gw_mod_aug$.resid )
+plot( tail( gw_mod_aug$.resid, n-1 ) ~ head( gw_mod_aug$.resid, n-1 ) )
+abline( h=0, v=0, col = grey(0.75))
+```
+the positive correlation in the graph indicates positive serial correlation  
+
+The Durbin-Watson test evaluates errors for correlation where the null hypothesis is that the errors are uncorrelated
+```{r}
+dwtest( nhtemp ~ wusa + jasper + westgreen + chesapeake + tornetrask + urals + mongolia + tasman, data = globwarm )
+```
+From these results, we can reject the null hypothesis and be confident that there is correlation of errors in the data.
+
+### Finding Unusual Observations
+
+### Leverage
+leverage points are extreme in the predictor space.  
+**half normal plot** identifying unusually large values of leverage. 
+```{r}
+#we are looking for outliers in third plot:
+countries <- row.names( savings )
+hatv <- hatvalues( savings_mod )
+head( hatv )
+sum( hatv )
+
+
+halfnorm( hatv, labs = countries, ylab = 'Leverages' )
+```
+If we standardize the residuals we can see how many standard deviations points are from the distribution center
+
+```{r}
+qqnorm( rstandard( savings_mod ) )
+abline( 0,1 )
+```
+
+### Outliers
+A point that does not fit the current model well.
+
+
+Simulate some data to take a look at how outliers may impact a model fit:
+```{r message=FALSE, warning=FALSE}
+testdata <- data.frame( x = 1:10, y = 1: 10+rnorm( 10 ) )
+lmod <- lm( y ~ x, testdata )
+
+#an outlier with a central predictor
+p1 <- rbind( testdata, c( 5.5, 12 ) )
+lmod1 <- lm( y ~ x, p1 )
+plt1 <- ggplot( p1, aes( x = x, y = y ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) + 
+  geom_smooth( method = "lm", alpha = .15 ) +
+  geom_smooth( data = testdata, method = 'lm', alpha = 0.15 ) +
+  theme_classic() +
+  geom_point( shape = 19, alpha = 0.5, size = 3, color = 'red', aes( x = 5.5, y = 12 ) ) +
+  ggtitle( 'Outlier with little leverage' ) +
+  xlim( c( 0, 15 ) ) +
+  ylim( c( 0, 18 ) )
+plt1
+
+
+#an extra point well outside the range of the data
+p2 <- rbind( testdata, c( 15, 15.1 ) )
+lmod2 <- lm( y ~ x, p2 )
+plt2 <- ggplot( p2, aes( x = x, y = y ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) + 
+  geom_smooth( method = "lm", alpha = .15 ) +
+  geom_smooth( data = testdata, method = 'lm', alpha = 0.15 ) +
+  theme_classic() +
+  geom_point( shape = 19, alpha = 0.5, size = 3, color = 'red', aes( x = 15, y = 15.1 ) ) +
+  ggtitle( 'Large leverage but is not an Outlier' ) +
+  xlim( c( 0, 15 ) ) +
+  ylim( c( 0, 18 ) )
+
+
+#an outlier with leverage
+p3 <- rbind( testdata, c( 15, 5.1 ) )
+lmod3 <- lm( y ~ x, p3 )
+plt3 <- ggplot( p3, aes( x = x, y = y ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) + 
+  geom_smooth( method = "lm", alpha = .15 ) +
+  geom_smooth( data = testdata, method = 'lm', alpha = 0.15 ) +
+  theme_classic() +
+  geom_point( shape = 19, alpha = 0.5, size = 3, color = 'red', aes( x = 15, y = 5.1 ) ) +
+  ggtitle( 'Large leverage and an Outlier' ) +
+  xlim( c( 0, 15 ) ) +
+  ylim( c( 0, 18 ) )
+
+grid.arrange( plt1, plt2, plt3, ncol = 2 )
+```
+
+Bonferroni Correction
+
+```{r}
+stud <- rstudent( lmod )
+stud[ which.max( abs( stud ) ) ]
+#compute the Bonferroni critical value:
+qt( 0.05 / ( 50*2 ), 44 )
+```
+
+A dataset with multiple outliers
+```{r}
+data( star, package = 'faraway' )
+plt1 <- ggplot( star, aes( x = temp, y = light ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3  ) +
+  geom_smooth( method = 'lm' )
+  theme_classic()
+  
+plt1
+```
+
+assess the data for outliers:
+```{r}
+range( rstudent( lm( light ~ temp, star ) ) )
+```
+
+```{r}
+star2 <- star %>% filter( temp >3.6 )
+plt1 + geom_smooth( data = star2, method = 'lm' )
+```
+When the four data point that represent four stars that are gas giants. then they are removed, the linear relationship between light intensity and core temperature is described by very different coefficients.  
+
+### Influential Observations
+**Influential Data Points**: cause a shift in the relationship of a model when removed from the data set.  
+the **Cook statistic** is a good way to show influential data points and can be visualized as a half-normal plot:  
+```{r}
+sumary( savings_mod )
+```
+```{r}
+cook <- cooks.distance( savings_mod )
+halfnorm( cook, labs = countries, ylab = "Cook's distances" )
+```
+Now we evaluate the fit after removing the data point with the largest cook's distance: Libya
+
+```{r}
+savings_modi <- lm( sr ~ pop15 + pop75 + dpi + ddpi, 
+                    savings, 
+                    subset = ( cook < max( cook ) ) )
+sumary( savings_modi )
+```
+```{r}
+plot( savings_modi )
+```
+
+### Checking the Structure of the Model:
+**Partial Regression Plots**: a look at the marginal relationship between the response and predictor variable after the effect of the other predictors has been removed. The partial regression plot allows us to focus on the relationship between one predictor and the response as in a simple regression. Better for outlier/influential point detection  
+**Partial Residuals Plot**: the partial regression of a variable plotted against the variable. Better for non-linearity detection
+
+```{r}
+d <- residuals( lm( sr ~ pop75 + dpi + ddpi, savings ) )
+m <- residuals( lm( pop15 ~ pop75 + dpi + ddpi, savings ) )
+p <- predict( savings_mod, type = 'term', term = 'pop15' )
+r <- residuals( savings_mod, type = 'partial' )[,'pop15']
+dat <- data.frame( 'd' = d, 'm' = m, 'p' = p, 'r' = r, 'pop15' = savings$pop15 )
+
+
+
+preg <- ggplot( dat, aes( x = m, y = d, ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3  ) +
+  geom_smooth( method = 'lm', se = FALSE ) +
+  xlab( 'pop15 residuals' ) +
+  ylab( 'Savings residuals' ) +
+  ggtitle( 'Partial Regression / Added Variable Plot' ) +
+  theme_classic()
+
+pres <- ggplot( dat, aes( x = pop15.1, y = r ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3  ) +
+  geom_smooth( method = 'lm', se = FALSE ) +
+  ylab( 'Partial for pop15' ) +
+  xlab( 'pop15' ) +
+  ggtitle( 'Partial Residual Plot' ) +
+  theme_classic()
+
+
+grid.arrange( preg, pres, ncol = 2 )
+```
+
+### Exercise 6.1
+Using the `sat` dataset, fit a model with the total SAT score as the response and expend, salary, ratio and takers as predictors. Perform regression diagnostics on this model to answer the following questions. Display any plots that are relevant. Do not provide any plots about which you have nothing to say. Suggest possible improvements or corrections to the model where appropriate.  
+
+```{r}
+data( sat )
+glimpse( sat )
+```
+```{r}
+sat_mod <- lm( total ~ expend + salary + ratio + takers, data = sat )
+sumary( sat_mod )
+```
+
+
+
+* (a) Check the constant variance assumption for the errors
+```{r}
+plot( fitted( sat_mod ), residuals( sat_mod ),
+      xlab = 'Fitted', ylab = 'Residuals' )
+abline( h = 0 )
+```
+Some signs of nonlinearity? nonconstant variance?...
+```{r}
+plot( fitted( sat_mod ), sqrt( abs( residuals( sat_mod ) ) ),
+      xlab = 'Fitted', ylab = expression( sqrt( hat( epsilon ))) )
+abline( h = 0 )
+```
+This looks more satisfactory?
+
+* (b) Check the normality assumption
+
+```{r}
+qqnorm( residuals( sat_mod ) )
+qqline( residuals( sat_mod ) )
+```
+That looks reasonably normal
+
+* (c) Check for large leverage points
+
+```{r}
+halfnorm( hatvalues( sat_mod ) )
+qqnorm( rstandard( sat_mod ) )
+abline( 0,1 )
+```
+
+* (d) Check for outliers
+```{r}
+
+```
+
+* (e) Check for influential points
+
+```{r}
+cook <- cooks.distance( sat_mod )
+halfnorm( cook,5 )
+```
+44 appears to be an outlier with leverage
+
+* (f) Check the structure of the relationship between the predictors and the response
+```{r}
+termplot( sat_mod, partial.resid = TRUE, terms = 3 )
+```
+
+
+
+## Transformation
+Transformations of the response and/or predictors can improve the fit and correst violations of model assumptions.
+
+When you use a log transformation on the response, the regression coefficients hace a particular interpretatio:
+$$\mbox{log}\hat{y} = \hat{\beta}_0 + \hat{\beta}_1x_1 + \cdots + \hat{\beta}_px_p$$
+$$\hat{y} = e^{\hat{\beta}_0}e^{\hat{\beta}_1x_1} \cdots e^{\hat{\beta}_px_p}$$
+
+The Box-cox transformation is a popular way to determine a transformation on the response.  
+
+Transforming the response can make the model harder to interpret, so we do not want to do it unless it is really necessary
+Here is an example with the savings data:
+```{r}
+data( savings )
+glimpse( savings )
+
+savings_mod <- lm( sr ~ pop15 + pop75 + dpi + ddpi, savings )
+boxcox( savings_mod, plotit = T )
+boxcox( savings_mod, plotot = T, lambda = seq( 0.5, 1.5, by = 0.1 ) )
+```
+
+### Transforming the Predictors
+
+Broken Stick Regression: Sometimes we have reason to believe that different linear regression models apply to different regions of the data. Broken stick uses two basis functions to describe the distribution:
+$$y = \beta_0 + \beta_1\mbox{B}_1(x) + \beta_2\mbox{B}_2(x) + \epsilon$$
+
+Polynomials. response surfaces.
+
+### Splines
+B-spline basis functions
+
+```{r}
+funky <- function( x ) sin( 2 * pi * x^3 )^3
+x = seq( 0,1,by = 0.01 )
+y = funky( x ) + 0.1*rnorm( 101 )
+matplot( x, cbind( y, funky(x) ), type = "pl", pch = 20, lty = 1, col = 1 )
+```
+
+look at the fits for orthogonal polynomial bases of order 4 and 12:
+```{r}
+g4 <- lm( y ~ poly( x, 4 ) )
+g12 <- lm( y ~ poly( x, 12 ) )
+matplot( x, cbind( y, g4$fit, g12$fit ), type = "pll", pch = 20, lty = c( 1,2 ), col = 1 )
+```
+The p4 does not fit the data well enough. However, the p14 appears to overfit.
+
+try with splines:
+```{r}
+knots <- c( 0, 0, 0, 0, 0.2, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 1, 1, 1, 1 )
+bx <- splineDesign( knots, x )
+lmodb <- lm( y ~ bx -1 )
+matplot( x, bx, type = 'l', col = 1 )
+matplot( x, cbind( y, lmodb$fit ), type = 'pl', pch = 20, lty = 1, col = 1 )
+```
+
+Smoothing spline
+```{r}
+ssf <- smooth.spline( x,y )
+matplot( x, cbind( y, ssf$y ), type = 'pl', lty = 1, pch = 20, col = 1 )
+```
+
+Additive Models.
+
+
+
+
+
+
+
+
+
 <br><br><br>
