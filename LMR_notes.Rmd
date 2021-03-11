@@ -28,6 +28,9 @@ library( MASS )
 library( ellipse )
 library( lmtest )
 library( splines )
+library( Amelia )
+library( simex )
+library( ggcorrplot )
 ```
 
 ## Introduction
@@ -1933,14 +1936,278 @@ ssf <- smooth.spline( x,y )
 matplot( x, cbind( y, ssf$y ), type = 'pl', lty = 1, pch = 20, col = 1 )
 ```
 
-Additive Models.
+## Missing Data
+
+### Types of Missing Data
+
+* **Missing Cases** fail to observe a complete case
+* **Incomplete Values** not a full series of data
+* **Missing Values** missed incidences
+
+Types of Missingness:  
+
+* **Missing Completely at Random (MCAR)** randomly missed cases or values
+* **Missing at Random (MAR)** systematically missed cases or values
+* **Missing Not at Random (MNAR)** missing due to an unobserved variable
+
+### Deletion
+
+```{r}
+data( chmiss, package = 'faraway')
+glimpse( chmiss )
+```
+
+standard summaries are a handy first peek to notice missing variables
+```{r}
+summary( chmiss )
+```
+
+the dataset is small enough, why not peek at the missing values by record (row)
+```{r}
+rowSums( is.na( chmiss ) )
+```
+
+Look for patterns in the missing data:
+```{r}
+image( is.na( chmiss ), axes = FALSE, col = gray(1:0) )
+axis( 2, at = 0:5/5, labels = colnames( chmiss ) )
+axis( 1, at = 0:46/46, labels = row.names( chmiss ), las = 2 )
+```
+The missing values seem to be randomly peppered throughout the data.
+
+One strategy to deal with this is to remove all the missing values. However, this reduces the number of observations from 47 to 27. This change in sample size results in larger standard errors for a regression fit as demonstrated here:
+
+```{r}
+modmiss <- lm( data = chmiss, involact ~ . )
+sumary( modmiss )
+```
+```{r}
+data( chredlin, package = 'faraway' )
+modfull <- lm( involact ~ ., data = chredlin )
+sumary( modfull )
+```
+
+Deleting cases is a simple strategy, but we end up throwing away information that might allow for a more precise inference.
+
+### Single Imputation
+
+a tempting solution is to impute using the mean
+```{r}
+cmeans <- colMeans( chmiss, na.rm = TRUE )
+mchm <- chmiss
+for( i in c( 1:4,6 ) ) mchm[ is.na( chmiss[,i]),i ] <- cmeans[i]
+imod <- lm( involact ~ ., mchm )
+sumary( imod )
+```
+Notice how the coefficients are dragged closer to 0. Imputing with the mean has the effect of flattening the data. This has the effect of reducing the magnitude of the importance of feature variables. Mean imputation is not recommended except where the fraction of filled values is small.
+
+Using regression methods to predict values of covariates
+```{r}
+lmodr <- lm( logit( race/100 ) ~ fire + theft + age + income, data = chmiss )
+ilogit( predict( lmodr, chmiss[ is.na( chmiss$race ),]))*100
+```
+
+compare these predicted values to the real data
+```{r}
+chredlin$race[ is.na( chmiss$race ) ]
+```
+
+The regression fill-in will also introduce a bias toward zero in the coefficients and reduce variance, but it's not as accute as imputation by the mean.
+
+### Multiple Imputation
+The problem with single imputation is that the imputed value, be it a mean or a regression-predicted value, tends to be less variable than the value we would have seen because the imputed value does not include the error variation that would normally be seen in observed data. Multiple imputation reincludes the error.  
+Here we use the `Amelia` package to perform multiple Imputation
+```{r}
+set.seed( 123 )
+chimp <- amelia( chmiss, m=25 )
+```
+now fit a linear model to the 25 imputed datasets and store the results:
+```{r}
+betas <- NULL
+ses <- NULL
+for(i in 1:chimp$m ){
+  lmod <- lm( involact ~ race + fire + theft + age, chimp$imputations[[i]])
+  betas <- rbind( betas, coef( lmod ) )
+  ses <- rbind( ses, coef( summary( lmod ) )[,2])
+}
+```
+
+use the `mi.meld()` function to find the beta estimate as well as the standard error. 
+```{r}
+cr <- mi.meld( q = betas, se = ses )
+cr
+```
+
+### Exercises
+
+#### 13.1
 
 
+#### 13.2
 
+## Problems with Predictors
 
+### Errors in Predictors
 
+The measurement error issue.  
+```{r}
+data( cars )
+cars_mod <- lm( dist ~ speed, data = cars )
 
+cars_p1 <- ggplot( cars, aes( x = speed, y = dist ) ) +
+  geom_point() +
+  geom_smooth( method = 'lm', se = F, color = 'black' ) +
+  theme_classic()
 
+cars_p1
+```
+
+the effect of adding measurement error to the predictor
+```{r}
+cars_mod1 <- lm( dist ~ I( speed + rnorm( dim( cars )[1] )), data = cars )
+cars_mod2 <- lm( dist ~ I( speed + 2*rnorm( dim( cars )[1] )), data = cars )
+cars_mod5 <- lm( dist ~ I( speed + 5*rnorm( dim( cars )[1] )), data = cars )
+cars_p1 + 
+  geom_abline(slope = cars_mod1$coefficients[2], intercept = cars_mod1$coefficients[1], color = 'yellow' ) +
+  geom_abline(slope = cars_mod2$coefficients[2], intercept = cars_mod2$coefficients[1], color = 'orange' ) +
+  geom_abline(slope = cars_mod5$coefficients[2], intercept = cars_mod5$coefficients[1], color = 'red' )
+```
+
+The slope gets shallower as the error increases.
+
+Here we simulate the effects of adding normal random error:
+```{r}
+vv <- rep( 1:5/10, each=1000 )
+slopes <- numeric( 5000 )
+for ( i in 1:5000 ) slopes[i] <- lm( dist ~ I( speed + sqrt( vv[i] )*rnorm( dim( cars )[1] )), data = cars )$coef[2]
+#plot the mean slopes for each variance
+betas <- c( coef( cars_mod )[2], colMeans( matrix( slopes, nrow=1000 ) ) )
+variances <- c( 0, 1:5/10 ) + 0.5
+plot( variances, betas, xlim = c( 0,1 ), ylim = c( 3.86,4 ) )
+#fit a linear model and extrapolate to 0 variance
+gv <- lm( betas ~ variances )
+coef( gv )
+points( 0, gv$coef[1], pch=3 )
+```
+
+The predicted value of $\hat{\beta}$ at variance equal to zero, that is no measurement error, is 4.0.  
+
+Here is a prediction result using the `simex` package:
+```{r}
+set.seed( 123 )
+lmod <- lm( dist ~ speed, cars, x = T )
+simout <- simex( lmod, "speed", 0.5, B=1000 )
+simout
+```
+
+### Changes in Scale 
+most methods work more reliably  when variables are on roughly similar scales.
+
+```{r}
+sumary( savings_mod )
+```
+
+rescale to measure income in thousands instead of dollars
+```{r}
+savings_mod_scale <- lm( sr ~ pop15 + pop75 + I(dpi/1000) + ddpi, data = savings )
+sumary( savings_mod_scale )
+```
+
+another approach is the use the function `scale()`
+the regression coefficients now represent the effect of a one standard unit increase in the predictor on the response in standard units
+```{r}
+savings_scaled <- data.frame( scale( savings ) )
+savings_mod_scale2 <- lm( sr ~ ., savings_scaled )
+sumary( savings_mod_scale2 )
+```
+
+Now, with the predictors on a common scale, it is helpful to construct plot estimates with confidence intervals
+```{r}
+edf <- data.frame( coef( savings_mod_scale2 ), confint( savings_mod_scale2 ) )[-1,]
+names( edf ) <- c( 'Estimate', 'lb', 'ub' )
+
+p <- ggplot( aes( y = Estimate, ymin = lb, ymax = ub, x = row.names( edf ) ), data = edf ) +
+  geom_pointrange() +
+  coord_flip() +
+  xlab( 'Predictor' ) +
+  geom_hline( yintercept = 0, col = gray( 0.75 ) ) +
+  ggtitle( 'standardized coefficients', subtitle = 'confidence intervals shown' )
+p
+```
+
+Scaling with binary predictors:
+```{r}
+#take a look at the variable pop15 for age
+ggplot( aes( x = pop15 ), data = savings ) +
+  geom_histogram()
+```
+
+The data is bimodal. we can create a binary variable for age that divides at `pop15`=35
+```{r}
+savings$age <- ifelse( savings$pop15 > 35, 0, 1 )
+```
+
+A binary predictor taking the values of 0/1 with equal probability has a standard deviation of one half. This suggests scaling the other continuous predictors by two SDs rather than one:
+```{r}
+savings$dpis <- (savings$dpi - mean( savings$dpi ))/(2*sd( savings$dpi ) )
+savings$ddpis <- (savings$ddpi - mean( savings$ddpi ))/(2*sd( savings$ddpi ) )
+sumary( lm( sr ~ age + dpis + ddpis, savings ) )
+```
+
+### Colinearity
+**colinearity**: when some predictors are linear combinations of others. $X^TX$ is singular  
+**multicolinearity**: $X^TX$ is close to singular but not exactly  
+
+detecting collinearity:  
+
+* correlation matrix values are close to $\pm$1, indicating large pairwise collinearities
+* a regression of $x_i$ on all other predictors gives $R^2_i$. $R^2_i \sim 1$ is bad and means one predictor can be be predicted by a linear combination of other predictors.
+* Examine the eigenvalues. eigenvalues close to 0 denote collinearity.
+
+```{r}
+data( seatpos, package = 'faraway' )
+seatpos_mod <- lm( hipcenter ~ ., data = seatpos )
+sumary( seatpos_mod )
+```
+none of the predictors are significant, yet, the $R^2$ is fairly large.  
+now to look at the pairwise correlations
+```{r}
+seatpos_cor <- round( cor( seatpos[,-9] ), 2 )
+seatpos_cor
+```
+ok, that's not very intuitive. 
+```{r}
+ggcorrplot( seatpos_cor )
+```
+There are several large pairwise correlations.  
+now to check the eigenvalue decomposition
+```{r}
+x <- model.matrix( seatpos_mod )[,-1]
+e <- eigen( t(x) %*% x )
+e$val
+```
+```{r}
+sqrt( e$val[1]/e$val )
+```
+compute the variance inflation factors:
+```{r}
+vif( x )
+```
+
+let's look at the correlation for all the length measurements:
+```{r}
+seatpos_length_cor <-round( cor( x[,3:8] ), 2 )
+seatpos_length_cor
+ggcorrplot( seatpos_length_cor )
+```
+
+let's take a look at model performance when we use just one length predictor, height
+```{r}
+seatpos_mod2 <- lm( hipcenter ~ Age + Weight + Ht, data = seatpos )
+sumary( seatpos_mod2 )
+```
+
+We get the same explanatory power but with a simpler model
 
 
 <br><br><br>

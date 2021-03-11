@@ -764,5 +764,122 @@ Multivariate generalization of the Box-Cox transformation method
 How To Think About It:
 ![](/home/bonzilla/Documents/MSDS/DATA621/logicflow.png)
 
+## Multiple Linear Regression
+It is common for more than one factor to influence an outcome.  
+Checking Multiple Linear Regression Model Validity...
+
+### Polynomial Regression
+Modeling Salary from years of experience
+```{r}
+path <- '/home/bonzilla/Documents/MSDS/DATA621/profsalary.csv'
+profsalary <- read.csv( path, sep = '\t' )
+glimpse( profsalary )
+p1 <- ggplot( profsalary, aes( x = Experience, y = Salary ) ) +
+  geom_point() +
+  geom_smooth( method = 'lm', se = F ) +
+  theme_classic()
+p1
+```
+very clearly a linear model is inappropriate here.
+
+```{r}
+quadmod <- lm( Salary ~ Experience + I( Experience^2 ), data = profsalary )
+quadmodaug <- augment( quadmod )
+glimpse( quadmodaug )
+```
+```{r}
+p2 <- p1 + geom_line( data = quadmodaug, aes( x = Experience, y = .fitted ), color = 'red' )
+p3 <- ggplot( quadmodaug, aes( x = Experience, y = .std.resid ) ) +
+  geom_point() +
+  theme_classic()
+p4 <- ggplot( quadmodaug, aes( x = Experience, y = .cooksd ) ) +
+  geom_point() +
+  theme_classic()
+grid.arrange( p2, p3, p4, ncol = 2 )
+```
+
+go ahead and look at the diagnostics:
+```{r}
+plot( quadmod )
+```
+
+### Estimation and Inference in Multiple Linear Regression
+Multiple Linear Regression:
+$$E(Y|X-1=x_1,X_2=x_2,\dots , X_p=x_p) = \beta_0 + \beta_1x_1 + \beta_2x_2 + \dots + beta_px_p$$
+Thus,
+$$Y_1 = \beta_0 + \beta_1x_1 + \beta_2x_2 + \dots + beta_px_p +\epsilon_i$$
+**Degrees of Freedom** = Sample Size - Number of mean parameters  
+
+For linear regression, $R^2 = \frac{SSreg}{SST} = 1 - \frac{RSS}{SST} $  
+However, adding irrelevant predictor variables to the regression equation often increases $R^2$. To compensate, we define an adjusted coefficient of determination: $R^2_{adj} = 1 - \frac{RSS/(n-p-1)}{SST/(n-1)}$
+
+The F-test is also used to test the linear association between Y and ANY of the p x-varaibles. If the F-test is significant then the next natural question to ask is which of the p x-variables is there evidence of a linear association.
+
+Testing whether a subset of predictors have regression coefficients = 0:
+Ex: Menu pricing at a new Italian restaurant in NYC
+```{r}
+nyc_csv <- read.csv( 'nyc.csv' )
+nyc_df <- data.frame( nyc_csv )
+glimpse( nyc_df )
+```
+```{r}
+nyc_mod <- lm( data = nyc_df, Price ~ Food + Decor + Service + East )
+summary( nyc_mod )
+```
+
+`Decor` has the largest reg. corefficient and is the most statistically significant to the model whereas `Service`'s coefficient does not appear to be statistically significant and has the smallest magnitude.
+
+### Analysis of Covariance
+Possible outcomes:  
+
+* coincident regression lines
+* parallel regression line
+* regression lines with equal intercepts but different slopes
+* unrelated regression line
+
+Ex: Amount spent on travel
+```{r}
+path <- '/home/bonzilla/Documents/MSDS/DATA621/travel.csv'
+travel <- read.csv( path, sep = '\t' )
+glimpse( travel )
+```
+```{r}
+ggplot( travel, aes( x = Age, y = Amount, color = factor(Segment) ) ) +
+  geom_point() +
+  theme_classic()
+```
+```{r}
+travel_mod <- lm( data = travel, Amount ~ Age + C + C*Age )
+summary( travel_mod )
+```
+Reduced Model:
+```{r}
+travel_mod_reduced <- lm( data = travel, Amount ~ Age )
+summary( travel_mod_reduced )
+```
+perform ANOVA to look at the F-test & compare the two models:
+```{r}
+anova( travel_mod_reduced, travel_mod )
+```
+There is very strong evidence against the reduced model. Thus, we prefer the unrelated regression lines model (full) to the coincident lines model (reduced)
+
+Going back to the NYC Italian restaurants:
+```{r}
+nyc_full_mod <- lm( Price ~ Food + Decor + Service + East + Food:East + Decor:East + Service:East, nyc_df )
+summary( nyc_full_mod )
+```
+
+NYC 'final' mod:
+```{r}
+nyc_final_mod <- lm( Price ~ Food + Decor + East, nyc_df )
+summary( nyc_full_mod )
+```
+
+now to look at the F-test for the ANOVA:
+```{r}
+anova( nyc_full_mod, nyc_final_mod )
+```
+Given the ANOVA p-val, there is little evidence to reject the null hypothesis (no difference between models). Therefore, we can adopt the simpler reduced model without losing much predictive power.
+
 
 <br><br><br>
