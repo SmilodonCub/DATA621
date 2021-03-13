@@ -1,0 +1,269 @@
+---
+title: 'Applied Predictive Modeling'
+subtitle: 'Measuring Performance in Classification Models'
+output:
+  rmdformats::downcute
+---
+
+## intro
+In some applications, we would like to know the predicted class probabilities which we can then use for other calculations (e.g. Bayesian inference).
+
+this demo will walk through a few visualization tools to measure the performance of classification models, i.e. models with a binary categorical predictor. here we will:  
+
+1. Simulate train & test datasets
+2. Fit two models & predict train data 
+3. Predict test data
+4. Compare the Sensitivity and Specificity of each model
+5. Confusion Matrices for each Model
+6. ROC Curves
+7. Lift Curves
+8. Asses quality of the class probabilities: Calibration Curves
+
+
+dependencies: 
+```{r, message=F}
+library( dplyr )
+library( ggplot2 )
+library( gridExtra )
+library( AppliedPredictiveModeling )
+library( caret )
+library( klaR )
+library( MASS )
+library( pROC )
+library( randomForest )
+```
+
+
+### simulate predictors and outcomes
+`quadBoundaryFunc()` - The quadBoundaryFunc function creates a class boundary that is a function of both predictors. The probability values are based on a logistic regression model with model equation: $-1-2*X_1 -0.2*X_1^2 + 2*X_2^2$. The predictors here are multivariate normal with mean (1, 0) and a moderate degree of positive correlation.
+```{r}
+set.seed( 123 )
+simulatedTrain <- quadBoundaryFunc( 500 )
+simulatedTest <- quadBoundaryFunc( 1000 )
+glimpse( simulatedTrain )
+```
+
+### Fit Models & Predict Class for test data
+Here we will fit two difference model classes to `simulatedTrain`  
+
+**Model 1: Random Forest:**  
+```{r}
+rfMod <- randomForest( class ~ X1 + X2, data = simulatedTrain, nTree = 2000 )
+```
+
+**Model 2: Quadratic Discriminant:**
+```{r}
+qdaMod <- qda( class ~ X1 + X2, data = simulatedTrain )
+```
+
+Now to predict the classification of the train dataset with the models:
+```{r}
+#predict train w/Mod1
+rfTrain_Pred <- predict( rfMod, simulatedTrain, type = 'prob')
+simulatedTrain$RFprob <- rfTrain_Pred[,'Class1']
+
+#predict train w/Mod2
+qdaTrain_Pred <- predict( qdaMod, simulatedTrain )
+simulatedTrain$QDAprob <- qdaTrain_Pred$posterior[,'Class1']
+```
+
+
+
+### Predict Class for test data
+
+Now to predict the classification of the train dataset with the models:
+```{r}
+#predict train w/Mod1
+rfTest_Pred <- predict( rfMod, simulatedTest, type = 'prob')
+simulatedTest$RFprob <- rfTest_Pred[,'Class1']
+simulatedTest$RFclass <- predict( rfMod, simulatedTest )
+
+#predict train w/Mod2
+qdaTest_Pred <- predict( qdaMod, simulatedTest )
+simulatedTest$QDAprob <- qdaTest_Pred$posterior[,'Class1']
+simulatedTest$QDAclass <- qdaTest_Pred$class
+
+glimpse( simulatedTest )
+```
+
+### Sensitivity and Specificity
+**Sensitivity**: the rate that the event of interest is predicted correctly  
+$$Sensitivity = \frac{\mbox{# pos samples that were predicted pos}}{\mbox{# pos samples}}$$
+**Specificity**: the rate that nonevents are predicted as nonevents  
+$$Specificity = \frac{\mbox{# neg samples that were predicted neg}}{\mbox{# neg samples}}$$
+**False Positive rate** = 1 - Specificity 
+**
+
+Use Class1 as the event of interest. I.e. in a signal detection theory approach, treat Class1 as a signal present event.
+```{r}
+RF_sens <- sensitivity( data = simulatedTest$RFclass,
+                        reference = simulatedTest$class,
+                        positive = 'Class1' )
+RF_spec <- specificity( data = simulatedTest$RFclass,
+                        reference = simulatedTest$class,
+                        negative = 'Class2' )
+QDA_sens <- sensitivity( data = simulatedTest$QDAclass,
+                        reference = simulatedTest$class,
+                        positive = 'Class1' )
+QDA_spec <- specificity( data = simulatedTest$QDAclass,
+                        reference = simulatedTest$class,
+                        negative = 'Class2' )
+
+res <- paste( 'Random Forest: Sensitivity =', round( RF_sens, 4 ), 'Specificity =', round( RF_spec, 4 ),
+              '\nQuadratic Discriminant: Sensitivity =', round( QDA_sens, 4 ), 'Specificity =', round( QDA_spec, 4 ) )
+
+cat( res, sep = '\n' )
+```
+
+sensitivity and specificity are conditional measures of accuracy. If we would like to take the prevalence into account, we can look at:  
+**Positive Predicted Values**: unconditional analogue of sensitivity
+$$PPV = \frac{ \mbox{ Sensitivity } \cdot \mbox{ Prevalence} }{ (\mbox{ Sensitivity } \cdot \mbox{ Prevalence}) + ( (1 -\mbox{ Sensitivity } ) \cdot ( 1 - \mbox{ Prevalence} )}$$
+**Negative Predicted Value**: unconditional analogue of specificity
+$$NPV = \frac{ \mbox{ Specificity } \cdot ( 1- \mbox{ Prevalence} ) }{ (\mbox{ Prevalence } \cdot (1-\mbox{ Sensitivity})) + ( \mbox{ Specificity } \cdot ( 1 - \mbox{ Prevalence} )}$$
+```{r}
+RF_posPV <- posPredValue( data = simulatedTest$RFclass,
+                        reference = simulatedTest$class,
+                        positive = 'Class1' )
+RF_negPV <- negPredValue( data = simulatedTest$RFclass,
+                        reference = simulatedTest$class,
+                        positive = 'Class2' )
+QDA_posPV <- posPredValue( data = simulatedTest$QDAclass,
+                        reference = simulatedTest$class,
+                        positive = 'Class1' )
+QDA_negPV <- negPredValue( data = simulatedTest$QDAclass,
+                        reference = simulatedTest$class,
+                        positive = 'Class2' )
+
+res <- paste( 'Random Forest: Sensitivity =', round( RF_posPV, 4 ), 'Specificity =', round( RF_negPV, 4 ),
+              '\nQuadratic Discriminant: Sensitivity =', round( QDA_posPV, 4 ), 'Specificity =', round( QDA_negPV, 4 ) )
+
+cat( res, sep = '\n' )
+```
+
+### Confusion Matrices
+
+Model 1: Random Forest confusion matrix
+```{r}
+confusionMatrix(  data = simulatedTest$RFclass,
+                        reference = simulatedTest$class,
+                        positive = 'Class1' )
+```
+
+Model 2: Quadratic Discriminant confusion matrix
+```{r}
+confusionMatrix(  data = simulatedTest$QDAclass,
+                        reference = simulatedTest$class,
+                        positive = 'Class1' )
+```
+
+
+
+### ROC curves
+Evaluating Cost Probabilities.  
+We can use class probabilities to compare models.  
+
+**Receiver Operator Characteristic** (ROC) curves evaluate the trade-off between sensitivity and specificity. These plots are a great tool for choosing a threshold that appropriately maximizes the trade-off between sensitivity and specificity.  
+
+Importantly, ROC curves can be used to quantitatively asses and compare models 
+```{r, message=F}
+roc_mod1 <- roc( response = simulatedTest$class, 
+                       predictor = simulatedTest$RFprob )
+roc_mod2 <- roc( response = simulatedTest$class, 
+                       predictor = simulatedTest$QDAprob )
+roc_plot <- plot( roc_mod1, 
+                  print.auc = TRUE, col = "blue")
+roc_plot <- plot( roc_mod2,
+                  print.auc = TRUE, 
+                 col = "green", print.auc.y = .4, add = TRUE)
+roc_plot
+```
+
+The Quadratic Discriminant (Model 2) has a slightly higher AUC. Before we interpret this as Model 2 having an classification edge of Model 1, let us inspect the confidence intervals for the two AUC values:
+
+```{r}
+ci.auc( roc_mod1 )
+ci.auc( roc_mod2 )
+```
+Both AUC measures are outside of the other's 95% CI, so the difference in AUCs between the two models is meaningful.
+
+### Lift Charts
+Lift charts plot the cumulative gain/lift against the cumulative percentage of samples that have been screened
+```{r}
+labs <- c( RFprob = "Random Forest",
+           QDAprob = "Quadratic Discriminat" )
+liftCurve <- lift( class ~ RFprob + QDAprob, 
+                   data = simulatedTest,
+                   labels = labs )
+liftCurve
+```
+
+plot the 2 curves:
+```{r}
+xyplot( liftCurve, 
+        auto.key = list( columns = 2, lines = T, points = F ) )
+```
+The shaded region: the diagonal 45$\deg$ long edge of the triangle represents performance of an uninformative model (chance) where as the upper two bounds of the triangle represent the performance of a perfect classifier. Here, we see that both models follow the envelope of the perfect classifier much more closely than the uninformative model. quadratic discriminant model seems to have a slight advantage over the random forest.
+
+### Calibration Probabilities
+```{r}
+calCurve <- calibration( class ~ RFprob + QDAprob, data = simulatedTest )
+xyplot( calCurve, auto.key = list( columns = 2 ) )
+```
+```{r}
+sigmoidalCal <- glm( relevel( class, ref = "Class2" ) ~ RFprob,
+                     data = simulatedTrain,
+                     family = binomial )
+sigmoidProbs <- predict( sigmoidalCal,
+                         newdata = simulatedTest[, "RFprob", drop = F ],
+                         type = "response" )
+simulatedTest$RFsigmoid <- sigmoidProbs
+
+sigmoidalCal <- glm( relevel( class, ref = "Class2" ) ~ QDAprob,
+                     data = simulatedTrain,
+                     family = binomial )
+sigmoidProbs <- predict( sigmoidalCal,
+                         newdata = simulatedTest[, "QDAprob", drop = F ],
+                         type = "response" )
+simulatedTest$QDAsigmoid <- sigmoidProbs
+
+glimpse( simulatedTest )
+```
+use a naive Bayes approach for calibration
+```{r}
+BayesCal_RF <- NaiveBayes( class ~ RFprob, data = simulatedTrain,
+                            usekernel = T )
+BayesProbs_RF <- predict( BayesCal_RF,
+                           newdata = simulatedTest[, "RFprob", drop = F ],
+                           type = "response" )
+simulatedTest$RFBayes <- BayesProbs_RF$posterior[, "Class1"]
+
+BayesCal_QDA <- NaiveBayes( class ~ QDAprob, data = simulatedTrain,
+                            usekernel = T )
+BayesProbs_QDA <- predict( BayesCal_QDA,
+                           newdata = simulatedTest[, "QDAprob", drop = F ],
+                           type = "response" )
+simulatedTest$QDABayes <- BayesProbs_QDA$posterior[, "Class1"]
+
+glimpse( simulatedTest )
+```
+
+visualize calibration curves:
+```{r}
+calCurve2 <- calibration( class ~ RFprob + RFBayes + RFsigmoid, data = simulatedTest )
+p1 <- xyplot( calCurve2, auto.key = list( columns = 2 ) )
+calCurve2 <- calibration( class ~ QDAprob + QDABayes + QDAsigmoid, data = simulatedTest )
+p2 <- xyplot( calCurve2, auto.key = list( columns = 2 ) )
+
+grid.arrange( p1, p2, ncol = 2 )
+```
+
+Something is fishy with the outcome for Random Forest here. But we can see for the Quadratic Discriminant that the Bayes and Sigmoid recalibrations improves predictions (these data point plot close to the unity line).
+
+
+
+
+
+
+
+
+<br><br><br>
