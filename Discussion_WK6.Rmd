@@ -1,0 +1,169 @@
+---
+title: 'Cost Curves as an ROC Alternative'
+subtitle: 'Discussion Week 6 DATA621'
+author: 'Bonnie Cooper'
+output:
+  rmdformats::downcute
+---
+
+```{r, message=F, include=FALSE}
+library( dplyr )
+library( ROCR )
+```
+
+Sensitivity & Specificity are measures of a model's accuracy. However, accuracy only describes how well the model predicts specific data. We may be interested in more nuanced measures such as metrics that quantify the consequences of correct and incorrect predictions. This discussion post presents Cost Curves for a two-way classifier. Cost curves plot Normalized Expected Cost ~ the Probability Cost Function. This may sound like further abstraction, but the goal of this post is to demonstrate that cost curves are arguably more intuitive visualizations than ROC Curves.
+
+Some Definitions  
+**Probability Cost Function (PCF)**  
+$$PCF = \frac{P \cdot C(+|-)}{P\cdot C(-|+)+(1-P)\cdot C(+|-)}$$
+using wordz: the probability cost function equals the prior probability of an event times the cost of a false positive divided by the sum of the prior probability times the cost of false negative and one mimus the prior probability of the event times the cost of a false negative.  
+Basically, the PCF is the proportion of total costs associated with a False-positive event  
+
+**Normalized Expected Cost (NEC)**  
+$$NEC = PCF\cdot (1-TP)+(1-PCF)\cdot FP$$
+using wordss: the normalized expected cost equals the sum of the probability cost function times the false negative rate and the false positive rate times one minus the probability cost function.  
+Basically, the NEC takes the prevalence of an event, the model performance and the cost into consideration and scales the cost between 0 and 1.  
+
+
+The figures below visualize the ROC and Cost Curves for 3 datasets from the `ROCR` library
+
+
+**A single instance**. Dataset: `ROCR.simple`  
+This is a 'simple' set of simulated prediction and class label data.
+```{r, echo=F}
+par(mfrow=c(1,2))
+data(ROCR.simple)
+
+pred <- prediction( ROCR.simple$predictions, ROCR.simple$labels)
+
+perf_roc <- performance( pred, "tpr", "fpr" )
+perf_cc <- performance(pred,"ecost")
+
+
+
+plot(perf_roc,lwd=1.5,xlim=c(0,1),ylim=c(0,1),
+     xlab='False Positive Rate',
+     ylab="True Positive Rate",
+     main='ROC')
+
+
+plot(perf_cc,lwd=1.5,xlim=c(0,1),ylim=c(0,1),
+     xlab='Probability cost function',
+     ylab="Normalized expected cost",
+     main='Cost Curve')
+
+title("Single Instance", line = -1, outer = TRUE)
+```
+Interpretations:  
+
+* **ROC Curve:** an ideal classifier would not have false positive classifications (or FN) and so the ROC curve to describe performance of an ideal classifier would follow a step function centered at x=0 to y= 1.0. Basically, it would follow the upper left corner of the plot. However, if a classifier is performing at chance, performance would follow a diagonal line from the origin to (1.0,1.0). In observing the profile of the data's ROC we can see that it performs better than chance but not as well as an ideal classifier. The Area Under the ROC Curve (AUC), can quantify the accuracy of the model's classification. Where AUC values closer to 1 approach the behavior of an ideal classifier.  
+* **Cost Curve:** the cost curve represents different nature of the data than the ROC. The Cost Curve visualizes the performance of a classifier over a full range of class distibutions and misclassification costs. The cost curve is build by plotting numerous lines that assume different costs associated with miscalculations. The lower envelope of all the cost lines is taken as the cost curve. (for details see [Drummond & Holte 2005](https://research.cs.wisc.edu/areas/ai/airg/cost-curves.pdf)). With Cost Curves, the AUC represents the expected cost of the classifier.
+
+
+**Multiple instances**. Dataset: `ROCR.xval`  
+This dataset is a simulated set of predictions & labels as might be returned from a 10-fold cross-validation.
+```{r echo=F}
+par(mfrow=c(1,2))
+data(ROCR.xval)
+
+pred <-prediction(ROCR.xval$predictions,ROCR.xval$labels)
+
+perf_roc <- performance( pred, "tpr", "fpr" )
+perf_cc <- performance(pred,"ecost")
+
+
+
+plot(perf_roc,lwd=1.5,xlim=c(0,1),ylim=c(0,1),
+     xlab='False Positive Rate',
+     ylab="True Positive Rate",
+     main='ROC')
+
+
+plot(perf_cc,lwd=1.5,xlim=c(0,1),ylim=c(0,1),
+     xlab='Probability cost function',
+     ylab="Normalized expected cost",
+     main='Cost Curve')
+
+title("Multiple Instances", line = -1, outer = TRUE)
+```
+Visualizing ROC and Cost Curves for the 10 folds gives us an idea of the variance of the model's predictive accuracy and cost respectively.
+
+
+**Comparing Model Performance**. Dataset: `ROCR.hiv`  
+This is an interesting dataset. Two different classifiers, a <span style="color: blue;"> linear support vector machine (in blue)</span> and a <span style="color: red;"> neural net classifier (in red)</span>, were applied to an HIV dataset to predict coreceptor usage from sequence data. The set include 10 cross-validation sets for both models. 
+```{r, echo=F}
+par(mfrow=c(1,2))
+data(ROCR.hiv)
+
+pred_nn <-prediction(ROCR.hiv$hiv.nn$predictions,ROCR.hiv$hiv.nn$labels)
+
+perf_nn_roc <- performance( pred_nn, "tpr", "fpr" )
+perf_nn_cc <- performance(pred_nn,"ecost")
+
+pred_svm <-prediction(ROCR.hiv$hiv.svm$predictions,ROCR.hiv$hiv.svm$labels)
+
+perf_svm_roc <- performance( pred_svm, "tpr", "fpr" )
+perf_svm_cc <- performance(pred_svm,"ecost")
+
+plot(perf_nn_roc,lwd=1.5,xlim=c(0,1),ylim=c(0,1), col = 'blue',
+     xlab='False Positive Rate',
+     ylab="True Positive Rate",
+     main='ROC')
+plot(perf_svm_roc,lwd=1.5,xlim=c(0,1),ylim=c(0,1), col = 'red',add=TRUE)
+
+plot(perf_nn_cc,lwd=1.5,xlim=c(0,1),ylim=c(0,1), col = 'blue',
+     xlab='Probability cost function',
+     ylab="Normalized expected cost",
+     main='Cost Curve')
+plot(perf_svm_cc,lwd=1.5,xlim=c(0,1),ylim=c(0,1), col = 'red',add=TRUE)
+
+title("Comparing Model Performance", line = -1, outer = TRUE)
+```
+
+The visualizations above facilitate model comparison  
+Let's interpret the figures:  
+
+* ROC curve: the curves for the Neural Net (red) have a higher area under the curve measure and therefore higher accuracy that the support vector machines (blue)
+* Cost Curves: the curves for the Neural Net (red) have a lower area under the curve measure that the support vector machines (blue) and therefore a lower expected cost.
+
+
+
+```{r, include=F, eval=F}
+data(ROCR.hiv)
+
+plot(0,0,xlim=c(0,1),ylim=c(0,1),xlab='Probability cost function',
+     ylab="Normalized expected cost",
+     main='HIV data: Expected cost curve (Drummond & Holte)')
+
+pred<-prediction(ROCR.hiv$hiv.nn$predictions,ROCR.hiv$hiv.nn$labels)
+
+lines(c(0,1),c(0,1))
+
+lines(c(0,1),c(1,0))
+
+perf1 <- performance(pred,'fpr','fnr')
+
+for (i in 1:length(perf1@x.values)) {
+    for (j in 1:length(perf1@x.values[[i]])) {
+        lines(c(0,1),c(perf1@y.values[[i]][j],
+                       perf1@x.values[[i]][j]),
+              col=rev(terrain.colors(10))[i],
+              lty=3)
+    }
+}
+
+perf<-performance(pred,'ecost')
+
+plot(perf,lwd=1.5,xlim=c(0,1),ylim=c(0,1),add=TRUE)
+
+perf_roc <- performance( pred, measure="tpr", x.measure="fpr" )
+
+plot( perf_roc )
+```
+
+
+**Summary**:  
+ROC curves are conventionally used to assess the accuracy of a 2-way classifier. However, accuracy is not the only factor that contributes to the performance of a model. Using the accuracy of a model's performance negates the fact that in many systems there are costs for misclassifications. Cost Curves are a powerful visualization that build costs and benefits of decisions into the accuracy determination. Furthermore, cost curves are normalized such that the prevalence of each class are accounted for.
+
+
+<br><br><br>
