@@ -31,6 +31,9 @@ library( splines )
 library( Amelia )
 library( simex )
 library( ggcorrplot )
+library( leaps )
+library( pls )
+library( lars )
 ```
 
 ## Introduction
@@ -2208,6 +2211,317 @@ sumary( seatpos_mod2 )
 ```
 
 We get the same explanatory power but with a simpler model
+
+## Model Selection  
+The problem of selecting the best subset of predictors.  
+**Occam's Razor**: among several plausible explanations for a phenomenon, the simplest is the best.  
+
+### Hierarchical Models
+Do not remove the lower order terms in the presence of higher order terms.  
+
+### Testing baes procedures  
+
+* Backwards Elimination - start with the kitchen sink. one-by-one remove the predictors with the highest p-values that are $\gt \alpha$
+* Forwards Elimination - start with nothing. try a model fit with each variable and progress with the variables that results in the smallest p-value. repeat this process until there are no more choices that lead to a better p-value.  
+* Stepwise Regression - a combination of forwards and backwards elimination.  
+
+```{r}
+data( state )
+statedata = data.frame( state.x77, row.names = state.abb )
+state_mod <- lm( Life.Exp ~ ., statedata )
+sumary( state_mod )
+```
+
+remove the predictor with the highest p-val:
+```{r}
+state_mod <- update( state_mod, . ~ . - Area )
+sumary( state_mod )
+```
+remove the predictor with the highest p-val:
+```{r}
+state_mod <- update( state_mod, . ~ . - Illiteracy )
+sumary( state_mod )
+```
+
+remove the predictor with the highest p-val:
+```{r}
+state_mod <- update( state_mod, . ~ . - Income )
+sumary( state_mod )
+```
+
+remove the predictor with the highest p-val:
+```{r}
+state_mod <- update( state_mod, . ~ . - Population )
+sumary( state_mod )
+```
+
+However, it is important to understand that the variables omitted from the model may still be related to the response.  
+
+Drawbacks to step-based procedures  
+
+* it is possible to miss the optimal model
+* the p-vals should not be treated too literally
+* variables that get dropped may still be correlated to the response of interest
+* step-wise variable selection methods tend to pick models that are smaller than desirable for prediction purposes
+
+### Criterion-Based Procedures 
+Choosing a model that optimizes a criterion.  
+**Kullback-Leiber information** (distance): $I(f,g)=\int f(x)log(\frac{f(x)}{g(x|\theta)})$  
+but we don't know $f$. sad face.  ...
+**Akaike Information Criterion**: $AIC = -2L(\hat{\theta}) +2p$  
+Choose the model that minimizes the AIC. AIC naturally balances between fit and simplicity in model selection  
+**Bayed Information Criterion** (BIC)
+
+```{r}
+b <- regsubsets( Life.Exp ~ ., data = statedata )
+rs <- summary( b )
+rs$which
+```
+```{r}
+AIC <- 50*log(rs$rss/50)+(2:8)*2
+plot( AIC ~ I(1:7), ylab = 'AIC', xlab="Number of Predictors")
+```
+AIC is minimized by a choice of 4 predictors
+
+Using $R^2_{adj}$
+```{r}
+plot( 2:8, rs$adjr2, xlab = 'No. of parameters', ylab = 'Adjusted R-squared')
+which.max( rs$adjr2 )
+```
+
+Mallow's Cp statistic
+```{r}
+plot( 2:8, rs$cp, xlab = 'No. of parameters', ylab = 'Cp statistic')
+abline( 0,1 )
+```
+
+`step()`
+```{r}
+state_mod <- lm( Life.Exp ~ ., data = statedata )
+step( state_mod )
+```
+
+The sequence of variable removal is the same as with backward elimination and the model selected is the same as for AIC.  
+
+Check for high leverage:
+```{r}
+h <- lm.influence( state_mod )$hat
+names(h) <- state.abb
+rev( sort( h ) )
+```
+Alaska has high leverage. retry fitting without Alaska:
+```{r}
+b <- regsubsets( Life.Exp ~ ., data = statedata, subset = ( state.abb!="AK"))
+rs <- summary( b )
+rs$which[ which.max( rs$adjr2 ),]
+```
+`AREA` is now included in the model  
+
+Now observe the data and see if transformations are necessary
+```{r}
+stripchart( data.frame( scale( statedata ) ), method = 'jitter', las = 2, vertical = TRUE )
+```
+
+both `AREA` and `Population` are skewed. re-evaluate the model:
+```{r}
+b <- regsubsets( Life.Exp ~ log( Population ) + Income + Illiteracy + Murder + HS.Grad + Frost + log( Area ), data = statedata )
+rs <- summary( b )
+rs$which[which.max( rs$adjr2),]
+```
+
+While selecting models, think about:  
+
+* Do the models have similar qualitative consequences?
+* Do they make similar predictions?
+* What is the cost of measuring the predictors?
+* Which has the best diagnostics?
+
+
+## Shrinkage Methods  
+More predictors in a model mean more information. This chapter looks at how to shrink the additional information into a more useful (interpretable) form.  
+
+### Principal Components
+**Principal Component Analysis** (PCA): finding low-dimensional linear structure in higher dimensional data.  
+find the orthogonal directions of the greatest variation in the data
+```{r}
+cfat <- fat[,9:18]
+prfat <- prcomp( cfat, scale = TRUE )
+dim( prfat$rot )
+dim( prfat$x )
+summary( prfat )
+round( prfat$rot[,1],2 )
+```
+
+**Mahalanobis Distance**: is a measure of the distance of a point from the mean that adjusts for the correlation in the data.
+```{r}
+robfat <- cov.rob( cfat )
+md <- mahalanobis( cfat, center = robfat$center, cov=robfat$cov )
+n <- nrow( cfat ); p <- ncol( cfat )
+plot( qchisq( 1:n/(n+1), p), sort(md), 
+      xlab = expression( paste( chi^2,"quantiles")), 
+      ylab = "Sorted Mahalanobis Distances")
+abline( 0,1 )
+```
+use the 1st 2 PCs to model the data
+```{r}
+lmodpcr <- lm( fat$brozek ~ prfat$x[,1:2] )
+sumary( lmodpcr )
+```
+
+Take a few representative predictors based on the two largest coefficients seen in the PCs:
+from the first 2 PCs, go with `Abdomen` and `Ankle`-`Abdomen`
+abdomen wasn't the largest coef in PC1, but going with it keeps the model down to 2 features whereas going with the largest (`Hip`) adds a 3rd predictor.
+```{r}
+lmodr <- lm( fat$brozek ~ scale( abdom ) + I( scale( ankle ) - scale( abdom ) ), data = cfat )
+sumary( lmodr )
+```
+
+There we go: we have a simple model that fits as well as the 10 predictor model. We can interpret it similarly to the previous model but it is easier to explain to others. Future studies might be done more cheaply because we might only need these two measures.  
+
+
+Build a model to predict the fat content of new samples using the 100 absorbances which can be measured more easily:
+```{r}
+data( meatspec, package = 'faraway' )
+#glimpse( meatspec )
+trainmeat <- meatspec[ 1:172, ]
+testmeat <- meatspec[ 173: 215,]
+meat_mod <- lm( fat ~ ., trainmeat )
+# r^2 for the kitchen sink
+summary( meat_mod )$r.squared
+```
+compare the rmse for the train and test sets
+```{r}
+rmse <- function( x,y ) sqrt( mean( (x-y )^2 ) )
+rmse( fitted( meat_mod ), trainmeat$fat )
+rmse( predict( meat_mod, testmeat ), testmeat$fat )
+```
+Performance is much worse for the test data.
+
+OKay, so there are 100 features in this dataset. We probably don't need them all.
+Next try a stepwise feature selection method:
+```{r message = F, echo=F, results='hide'}
+meat_mod_step <- step( meat_mod );
+rmse( meat_mod_step$fit, trainmeat$fat )
+rmse( predict( meat_mod_step, testmeat ), testmeat$fat )
+```
+~28 features were dropped and performance was increased a bit.
+
+Now let's go with PCR
+```{r}
+meatpca <- prcomp( trainmeat[, -101 ] )
+round( meatpca$sdev, 3 )
+```
+```{r}
+matplot( 1:100, meatpca$rot[,1:3], type = 'l', xlab = 'Frequency', ylab = '', col = 1 )
+```
+PCR
+```{r}
+meatpcr <- pcr( fat ~ ., data = trainmeat, ncomp = 50 )
+rmse( predict( meatpcr, ncomp = 4 ), trainmeat$fat )
+```
+
+```{r}
+par(mfrow=c(1,2))
+#plot the 100 slope coefs for the kitchen sink
+plot( meat_mod$coef[-1], xlab = 'Frequency', ylab = 'Coefficient', type = 'l' )
+coefplot( meatpcr, ncomp = 4, xlab = 'Frequency', main = '' )
+```
+we used 4 PCs, why? How to select the number: *skree* plot (plot of stds)
+```{r}
+plot( meatpca$sdev[ 1:10 ], type = 'l', ylab = 'SD of PC', xlab = 'PC number' )
+```
+General rule of thumb: use PCs up to the last 'elbow' in the skree plot
+
+How well does 4 PCs work with the test data?
+```{r}
+rmse( predict( meatpcr, testmeat, ncomp = 4 ), testmeat$fat )
+```
+
+```{r}
+pcrmse <- RMSEP( meatpcr, newdata = testmeat )
+plot( pcrmse, main = '' )
+which.min( pcrmse$val )
+```
+```{r}
+pcrmse$val[ 28 ]
+```
+The best result occurs fro 28 PCs.  
+
+**Crossvalidation**  
+```{r}
+set.seed( 123 )
+meatpcr <- pcr( fat ~ ., data = trainmeat, validation = 'CV', ncomp = 50 )
+meatCV <- RMSEP( meatpcr, estimate = 'CV' )
+plot( meatCV, main = '' )
+minPCs <- which.min( meatCV$val )
+ypred <- predict( meatpcr, testmeat, ncomp = minPCs )
+rmse( ypred, testmeat$fat )
+```
+
+This gives a much more improved RMSE
+
+### Partial Least Squares  
+a method for relating a set of input variables and outputs  
+apply PLS using CV to select components:
+```{r}
+par(mfrow=c(1,2))
+set.seed( 123 )
+meatpls <- plsr( fat ~ ., data = meatspec[1:172,], ncomp=50, validation = "CV" )
+coefplot( meatpls, ncomp = 4, xlab = "Frequency", main = "" )
+plsCV <- RMSEP( meatpls, estimate = 'CV' )
+plot( plsCV, main="" )
+```
+From the right hand figure, we see we need around 15 components  
+see how it performs on the train set:
+```{r}
+ypred <- predict( meatpls, ncomp = 15 )
+rmse( ypred, trainmeat$fat )
+```
+see how it performs on the test set:
+```{r}
+ytpred <- predict( meatpls, testmeat, ncomp = 15 )
+rmse( ytpred, testmeat$fat )
+```
+We did slightly better than PCR.
+
+### Ridge Regression
+Suppose that the predictors have been centered by their means and scaled by their standard deviations and that the response has been centered.
+
+### Lasso Regression
+Lasso regression is pretty good when there are lots of predictors. Lasso is particularly good when we believe the effects are sparse; that few of the predictors have an effect.
+```{r}
+trainy <- trainmeat$fat
+trainx <- as.matrix( trainmeat[,-101] )
+meatlasso <- lars( trainx, trainy )
+```
+
+now the CV
+```{r}
+set.seed( 123 )
+cvout <- cv.lars( trainx, trainy )
+cvout$index[ which.min( cvout$cv ) ]
+testx <- as.matrix( testmeat[,-101] )
+predlars <- predict( meatlasso, testx, s=0.0101, mode='fraction')
+rmse( testmeat$fat, predlars$fit )
+```
+
+Thats the best RMSE so far.  
+```{r}
+predlars <- predict( meatlasso, s = 0.0101, type = "coef", mode="fraction" )
+plot( predlars$coef, type = 'h', ylab="Coefficient" )
+sum( predlars$coef != 0 )
+```
+
+
+
+
+
+
+
+
+
+
+
 
 
 <br><br><br>
