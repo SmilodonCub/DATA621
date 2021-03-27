@@ -881,5 +881,7 @@ anova( nyc_full_mod, nyc_final_mod )
 ```
 Given the ANOVA p-val, there is little evidence to reject the null hypothesis (no difference between models). Therefore, we can adopt the simpler reduced model without losing much predictive power.
 
+## Diagnostics and Transformations for Multiple Linear Regression
+
 
 <br><br><br>

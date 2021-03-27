@@ -1,0 +1,335 @@
+---
+title: 'Extending the Linear Model with `R`'
+subtitle: 'by Julian Faraway'
+author: 'notes by Bonnie Cooper'
+output:
+  rmdformats::downcute
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+The following are notes from readings in ['Extending the Linear Model with `R`'](https://julianfaraway.github.io/faraway/ELM/) by Julian Faraway for the course DATA621, 'Business Analystics and Data Mining' as part of the [Masters of Science in Data Science program at CUNY SPS](https://sps.cuny.edu/academics/graduate/master-science-data-science-ms).  
+
+`R` Libraries Used:
+```{r message=F}
+library( faraway )
+library( dplyr )
+library( ggplot2 )
+library( gridExtra )
+library( tidyverse )
+library( MASS )
+library( brglm2 )
+library( survival )
+```
+
+
+## Binomial Data
+
+### The Challenger Disaster Example  
+We are interested in how the probability of failure in a given O-ring is related to the launch temperature and predicting the probability when the temperature is $31^\circ$F.
+
+```{r}
+data( orings )
+glimpse( orings )
+```
+
+Visualize the data and fit a simple linear regression model:
+```{r}
+p1 <- ggplot( data = orings, aes( x = temp, y = damage/6 ) ) +
+  geom_point(fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  #geom_jitter(fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_smooth( method = 'lm', col = 'red', se = F ) +
+  ylab( 'Prob of Damage' ) +
+  xlab( 'Temperature' ) +
+  ggtitle( 'Naive Approach: simple linear regression' ) +
+  theme_classic()
+
+p1
+```
+
+However, there are several problems to the simple linear regression approach. Most obviously that the linear regression method can predict probabilities $\gt1 \mbox{ & } \lt 0$ and that is problematic, because those values are not possible.
+
+### Binomial Regression Model
+
+$$P(\mbox{k out of n}) = \frac{n!}{k!(n-k)!}p^k(1-p)^{(n-k)} = 
+\left( \begin{array}{c} n_i \\ y_i \end{array} \right)p_i^{y_i}(1-p_i)^{n_i-y_i}$$
+$$P(\mbox{event k happening out n possible ways}) = (\mbox{how many possibilities})\cdot P(\mbox{each of n possibilities})$$
+to describe the relationship of all the predictors ($x_{i1}\dots x_{iq}$) to p (the success probability), we set up a linear predictor $\eta_i = \beta_0 + \beta_1x_{i1} + \dots + \beta_qx_{iq}$.  
+
+$\eta_i = p_i$ is not appropriate, because it is required that $0\leq p_i \leq 1$, so here are some other choices to use as **linking functions**:  
+
+1. Logit: $\eta = log( p/(1-p))$
+2. Propit $\eta = \Phi^{-1}(p)$ where $\Phi$ is the inverse normal cumulative distribution function
+3. Complimentary log-log: $\eta = log(-log(1-p))$
+
+**Link Functions**: link the linear predictor to the mean of the response in the wider class of models
+
+Here we will use the logit as a linking function:
+```{r}
+logitmod <- glm( cbind( damage, 6 - damage ) ~ temp, family = binomial, orings )
+sum_logit <- summary( logitmod )
+sum_logit$coefficients
+```
+
+visualize the logit & probit fit to the data 
+```{r}
+
+p2 <- ggplot( data = orings, aes( x = temp, y = damage/6 ) ) +
+  geom_point(fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_smooth( method = 'glm', col = 'blue', method.args = list( family = binomial(link = "probit")), se = F ) +
+  geom_smooth( method = 'glm', col = 'red', method.args = list( family = 'binomial'), se = F ) +
+  ylab( 'Prob of Damage' ) +
+  xlab( 'Temperature' ) +
+  ggtitle( 'GLM: logistic regression' ) +
+  theme_classic()
+p2
+```
+
+look at the coefficients for the probit glm:
+```{r}
+probitmod <- glm( cbind( damage, 6 - damage ) ~ temp, family = binomial( link = "probit"), orings )
+sum_probit <- summary( probitmod )
+sum_probit$coefficients
+```
+
+Although the coefficients are quite different, the fits are similar, particularly in the range of the data.  
+
+Now to predict the value at 31 degrees F
+```{r}
+ilogit( sum_logit$coefficients[1,1] + sum_logit$coefficients[2,1]*31 )
+pnorm( sum_probit$coefficients[1,1] + sum_probit$coefficients[2,1]*31 )
+```
+
+### Inference
+```{r}
+sum_logit$coefficients
+pchisq( deviance( logitmod ), df.residual( logitmod ), lower = F )
+```
+
+construct a profile likelihood-based confidence interval
+```{r}
+confint( logitmod )
+```
+
+### Interpreting Odds
+Odds are sometimes a better scale than probability to represent chance. Odds arose as a way to express the payoffs for bets.  
+
+\t\t $o = \frac{p}{1-p}$     $p = \frac{o}{1 + o}$  
+
+Odss also form the basis of a subjective assessment of probability.  
+If we have two covariates ($x_1 \mbox{ & } x_2$) then:  
+$$log( odds ) = log(\frac{p}{1-p}) = \beta_0 + \beta_1x_1 + \beta_2x_2$$
+Incidence of respiratory disease in infants to the age of 1 year
+```{r}
+data( babyfood )
+xtabs( disease/(disease+nondisease ) ~ sex + food, data = babyfood )
+```
+
+fit the model:
+```{r}
+babyfood_mod1 <- glm( cbind( disease, nondisease ) ~ sex + food, family = binomial, data = babyfood )
+sum_bfood_mod1 <- summary( babyfood_mod1 )
+sum_bfood_mod1
+```
+is there a sex-food interactions? ....look at the residual deviance. here it is small for the given degrees of freedon, therefore we can conclude that there is no evidence of an interaction effect.  
+
+test the main effects:
+```{r}
+drop1( babyfood_mod1, test = 'Chi' )
+```
+the `drop1` function result shows that both predictors are significant
+
+```{r}
+exp( sum_bfood_mod1$coefficients[3,1 ] )
+```
+
+Breast feeding reduces the odds of respiratory disease to 51% of that for bottle feeding
+
+find confidence intervals:
+```{r}
+exp( confint( babyfood_mod1 ) )
+```
+
+### Prospective and Retrospective Sampling
+**Prospective Sampling** - 'cohort study' the predictors are fixed and then the outcome is observed. ex: have a subject group that present with certain features which are monitored accordingly.
+**Retrospective sampling** - 'case-control study' the outcome is fixed and then the predictors are observed. a group of test condition observations are observed (e.g. disease ) and a seperate group of control subjects are observed (disease-free). retrospective studies are cheaper and faster and more convenient. However they are less reliable because they typically use historical record which are known to inaccuracies and incompletenesses.
+
+```{r}
+babyfood[c(1,3), ]
+```
+
+* given the infant is breast fed, the log-odds of having a respiratory disease are log( 47/447 )
+* given the infant is bottle fed, the log-odds of having respiratory disease are log( 77/381 )
+* **log-odds ratio**: the difference between these two represents the increased risk of respiratory disease incurred by bottle feeding relative to breast feeding
+```{r}
+log( 77/381 ) - log( 47/447 )
+```
+
+### Choice of Link Function
+
+```{r}
+data( bliss )
+glimpse( bliss )
+```
+
+fit all three link functions:
+```{r}
+blissm1 <- glm( cbind( dead, alive ) ~ conc, family = binomial, data = bliss )
+blissm2 <- glm( cbind( dead, alive ) ~ conc, family = binomial( link = probit ), data = bliss )
+blissm3 <- glm( cbind( dead, alive ) ~ conc, family = binomial( link = cloglog ), data = bliss )
+```
+
+visualize:
+```{r}
+par( mfrow=c(1,3) )
+
+x <- seq( -2, 8, 0.2 )
+p1 <- ilogit( blissm1$coefficients[1] + blissm1$coefficients[2]*x )
+p2 <- pnorm( blissm2$coefficients[1] + blissm2$coefficients[2]*x )
+p3 <- 1-exp( -exp( blissm3$coefficients[1] + blissm3$coefficients[2]*x ) )
+plot( x, p1, type = "l", ylab = "Probability", xlab = "Dose" )
+lines( x, p2, lty = 2 )
+lines( x, p3, lty = 5 )
+
+matplot( x, cbind( p2/p1, (1-p2)/(1-p1)), type = 'l', xlab = "Dose", ylab = "Ratio" )
+
+matplot( x, cbind( p3/p1, (1-p3)/(1-p1)), type = 'l', xlab = "Dose", ylab = "Ratio" )
+```
+The fits are very close to each other in the region that spans the data (0:4). However, they deviate in the tails as the ratio plots show.  
+
+The default choice is the logit link. There are three advantages: it leads to simpler mathematics due the intractability of $\Phi$; it is easier to interpret using odds and it allows easier analysis of retrospectively sampled data. 
+
+### Estimation Problems
+```{r}
+data( hormone )
+plot( estrogen ~ androgen, data = hormone, col = orientation )
+```
+fit a binomial model to see if orientation can be predicted from the two hormone values.  
+When the response is binary, we can use it directly in the glm function:
+
+```{r}
+hormone_mod <- glm( orientation ~ estrogen + androgen, data = hormone, family = binomial )
+summary( hormone_mod )
+```
+The residual deviance is very small, indicating a good fit. However, the algorithm did not converge.
+
+A look at the plot of the data reveals that it is linearly seperable so that a perfect fit is possible: 
+```{r}
+plot( estrogen ~ androgen, data = hormone, col = orientation )
+abline( -hormone_mod$coefficients[1]/hormone_mod$coefficients[2], 
+        -hormone_mod$coefficients[3]/hormone_mod$coefficients[2],
+        col = 'magenta')
+```
+Use David Firths method which always gives finite estimates
+
+### Goodness of Fit
+
+Deviance is a good measure, but there are others:
+Pearson's $\chi^2$ which is analogous to the residual sum of squares in normal linear models  
+
+```{r}
+#pearson's chi squared
+sum( residuals( blissm1, type = 'pearson' )^2 )
+#deviance
+deviance( blissm1 )
+```
+We can see that there is little difference
+
+Niglekerke's 1991 statistic for how well the model explains the data
+```{r}
+(1 - exp((blissm1$dev - blissm1$null)/150))/ (1-exp(-blissm1$null/150))
+```
+That is a very good fit
+
+### Prediction and Effective Doses
+We wish to predict the outcome for given values of the covariates. use the inverse of the link function to get the prediction on the probability scale:
+```{r}
+blissm1_sum <- summary( blissm1 )
+x0 <- c( 1, 2.5 )
+eta0 <- sum( x0*coef( blissm1 ) )
+ilogit( eta0 )
+```
+
+There is a 64% chance of a death at this dose. now to find the confidence interval:
+```{r}
+bliss_pred <- predict( blissm1, newdata = data.frame( conc = 2.5 ), se = T )
+c1 <- bliss_pred$fit
+c2 <- bliss_pred$se.fit
+ilogit( c( c1 - 1.96*c2, c1 + 1.96*c2 ) )
+```
+
+$$\mbox{Lethal Dose} = \hat{ED50} = \frac{-\hat{\beta}_0}{\hat{\beta}_1}$$
+$$\mbox{Effective Dose} = x_p = \frac{\mbox{logit}(p)-\beta_0}{\hat{\beta}_1}$$
+```{r}
+dose.p( blissm1, p = c( 0.5, 0.9 ) )
+```
+
+### Overdispersion
+```{r}
+data( troutegg )
+ftable( xtabs( cbind( survive, total ) ~ location + period, data = troutegg ) )
+```
+
+fit a glm for the two main effects 
+```{r}
+eggmod <- glm( cbind( survive, total-survive ) ~ location + period, family = binomial, data = troutegg )
+summary( eggmod )
+```
+
+check for outliers:
+```{r}
+halfnorm( residuals( eggmod ) )
+```
+
+plot the empiracal logits:
+```{r}
+elogits <- log( ( troutegg$survive + 0.5 )/( troutegg$total - troutegg$survive + 0.5 ) )
+with( troutegg, interaction.plot( period, location, elogits ) )
+```
+Having eliminated the usual suspects, we now investigate overdispersion.  
+estimate a dipersion parameter:
+```{r}
+sigma2 <- sum( residuals( eggmod, type = 'pearson' )^2 )/12
+summary( eggmod, dispersion = sigma2 )
+```
+
+Note the change in p-vals for several predictors
+
+
+### Matched Case-Control Studies  
+Confounding variables are explicitly adjusted for in the experiment design.  
+In a **matched case-control study** we match each case with one or more controls that have the same or similar values of some set of potential confounding variables. 
+```{r}
+data( amlxray )
+glimpse( amlxray )
+```
+```{r}
+ii <- which( amlxray$downs=="yes" )
+ramlxray <- amlxray[ -c( ii, ii+1 ),]
+xraymod <- clogit( disease ~ Sex + Mray + CnRay + strata( ID ), data = ramlxray )
+summary( xraymod )
+```
+
+drop some insignificant factors
+```{r}
+xraymod2 <- clogit( disease ~ Fray + unclass(CnRay) + strata( ID ), ramlxray )
+summary( xraymod2 )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<br><br><br>

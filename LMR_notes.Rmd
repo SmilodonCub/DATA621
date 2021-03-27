@@ -9,7 +9,7 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-The following are notes from readings in ['A Modern Approach to Regression with `R`'](https://www.routledge.com/Linear-Models-with-R/Faraway/p/book/9781439887332) by Julian Faraway for the course DATA621, 'Business Analystics and Data Mining' as part of the [Masters of Science in Data Science program at CUNY SPS](https://sps.cuny.edu/academics/graduate/master-science-data-science-ms).
+The following are notes from readings in ['Linear Models with `R`'](https://www.routledge.com/Linear-Models-with-R/Faraway/p/book/9781439887332) by Julian Faraway for the course DATA621, 'Business Analystics and Data Mining' as part of the [Masters of Science in Data Science program at CUNY SPS](https://sps.cuny.edu/academics/graduate/master-science-data-science-ms).
 
 `R` libraries used:
 ```{r message=FALSE}
@@ -2400,7 +2400,7 @@ Performance is much worse for the test data.
 OKay, so there are 100 features in this dataset. We probably don't need them all.
 Next try a stepwise feature selection method:
 ```{r message = F, echo=F, results='hide'}
-meat_mod_step <- step( meat_mod );
+meat_mod_step <- step( meat_mod, trace = F );
 rmse( meat_mod_step$fit, trainmeat$fat )
 rmse( predict( meat_mod_step, testmeat ), testmeat$fat )
 ```
