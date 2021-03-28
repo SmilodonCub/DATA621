@@ -20,6 +20,7 @@ library( gridExtra )
 library( tidyverse )
 library( gclus )
 library( car )
+library( VGAM )
 ```
 
 ## Introduction
@@ -882,6 +883,246 @@ anova( nyc_full_mod, nyc_final_mod )
 Given the ANOVA p-val, there is little evidence to reject the null hypothesis (no difference between models). Therefore, we can adopt the simpler reduced model without losing much predictive power.
 
 ## Diagnostics and Transformations for Multiple Linear Regression
+
+## Variable Selection
+
+## Logistic Regression
+
+**Logistic Regression** - here we consider the situation where the response variable is a binary yes/no response. Ideally such responses follow a binomial distribution in which case the appropriate model is a logistic regression model.  
+
+### Logistic Regression based on a single predictor  
+
+**Binomial Distributions** - $Y \sim \mbox{Bin}(m,\theta)$ a process where:  
+
+* there are $m$ identical trials
+* each trial results in one of two outcomes, either a success or a failure
+* the probability for a success is the same for all trials
+* the trials are independent
+
+Binomial process trials are caller **Bernoulli trials**  
+consider the sample proportions of 'successes', $\frac{y_i}{m_i}$ as an unbiased estimate of $\theta$ that varies between 0 and 1.  
+Least squares regression is inappropriate for binomial processes because the variance of the response is not constant
+
+```{r}
+zagatNYC <- read.csv( 'MichelinFood.csv', sep = '\t' )
+glimpse( zagatNYC )
+```
+```{r}
+ggplot( aes( y  = proportion, x = Food ), data = zagatNYC ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  theme_classic() +
+  ggtitle( 'Sample Proportion ~ Food Rating' )
+```
+The envelope of the data makes it clear that a straight linear fit does not adequately describe the data. Rather, a sigmoidal curve gives the best approximation.  
+
+### The Logistic Function and Odds.
+
+A popular choice for the sigmoidal function is the logistic function:
+$$\theta (x) = \frac{exp(\beta_0 + \beta_1x)}{1+exp(\beta_0 + \beta_1x} = \frac{1}{1+exp(-(\beta_0 + \beta_1x)}$$
+$$\beta_0 + \beta_1x = log \left(\frac{\theta(x)}{1 - \theta(x)} \right)$$
+$$\mbox{logit} = \frac{\theta(x)}{1 - \theta(x)}$$
+
+if $\theta = P(\mbox{success})$, 
+$$\mbox{Odds in favor of success} = \frac{P(\mbox{success})}{1-P(\mbox{success})} = \frac{\theta}{1-\theta}$$
+$$\mbox{Odds against success} = \frac{1-P(\mbox{success})}{P(\mbox{success})} = \frac{1-\theta}{\theta}$$
+
+```{r}
+ggplot( aes( y  = proportion, x = Food ), data = zagatNYC ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_smooth( method = 'glm', col = 'red', method.args = list( family = 'binomial'), se = F ) +
+  theme_classic() +
+  ylab( 'P(included in Michelin)' ) +
+  xlab( 'Zagat Food Rating' ) +
+  ggtitle( 'Probability of Inclusion in Michelin Guide ~ Food Rating' )
+```
+
+```{r}
+zagatNYC_mod <- glm( cbind( InMichelin, NotInMichelin ) ~ Food, family = binomial, zagatNYC )
+summary( zagatNYC_mod )
+```
+
+From this result, if the Zagat food rating is increased by one unit, then the odds of being included in the Michelin guide increases by `r exp(zagatNYC_mod$coefficients[2] )`
+
+
+Find the estimated probabilities and the odds obtained using the logistic model
+```{r}
+zagatNYC_odds <- data.frame( 'Food' = zagatNYC$Food, 'pInc' = fitted( zagatNYC_mod ) ) %>%
+  mutate( odds = pInc / ( 1 - pInc ) )
+head( zagatNYC_odds )
+```
+
+
+#### Likelihood for Logistic Regression with a Single Predictor
+How likelihood can be used to estimate the parameters of logistic regression  
+The likelihood function is the function of the unknown probability of success
+
+$$log(1 - \theta(x_i)) = log \left( \frac{1}{1+exp(-(\beta_0 + \beta_1x)} \right)$$
+and the parameters $\beta_0 \mbox{ & } \beta_1$ can be estimated by maximizing the log-likelihood canbe found with the Newton-Raphson method.  
+testing the hypothesis $H_0 : \beta_1 = 0$ is to use the Wald test statistic
+
+#### Explanation of Deviance
+**deviance** replaces the concept of residual sum of squares.  
+$$G^2 = 2\sum_{i=1}^n \left[ y_i\mbox{log} \left(\frac{y_i}{\hat{y_i}}\right) + (m_i-y_i)\mbox{log}\left(\frac{m_i-y_i}{m_i-\hat{y_i}}\right) \right]$$
+We wish to test:  
+
+* $H_0$ - the logistic regression model is appropriate
+* $H_A$ - the logistic regression model is inappropriate
+
+```{r}
+zagatNYC_mod_sum <- summary( zagatNYC_mod )
+zagatNYC_mod_sum
+```
+
+
+#### Using differences in Deviance Values to Compare Models 
+
+Compare the null  and residual deviances to test $H_0 : \beta_1 = 0$ against $H_A : \beta_1 \ne 0$
+```{r}
+zagatNYC_mod_anova <- anova( zagatNYC_mod, test = 'F' )
+zagatNYC_mod_anova
+```
+ 
+
+#### $R^2$ for Logistic Regression
+
+$$R^2_{dev} =  1 - \frac{G^2_{H_A}}{G^2_{H_0}}$$
+```{r}
+zagatNYC_mod_anova$`Resid. Dev`
+```
+```{r}
+R2dev <- 1 - zagatNYC_mod_anova$`Resid. Dev`[2]/zagatNYC_mod_anova$`Resid. Dev`[1]
+R2dev
+```
+can also look at the Pearson goodness-of-fit stat to evaluate
+
+#### Residuals for Logistic Regression
+diagnostic procedures for logistic regression.  
+
+Can look at :
+
+* Response residuals - can be difficult to interpret because of nonconstant variance
+* standardized Pearson's residuals
+* standardized Deviance residuals
+
+```{r}
+zagatNYC_3res <- data.frame( 'Food' = zagatNYC$Food, 'Response' = zagatNYC$proportion ) %>%
+  mutate( Res_resid = zagatNYC_mod$residuals,
+    dev_resid = residuals( zagatNYC_mod, type = 'response' ),
+    pear_resid = residuals( zagatNYC_mod, type = 'pearson' ) )
+head( zagatNYC_3res )
+```
+
+
+### Binary Logistic Regression 
+
+the binary form of the zagat data:
+```{r}
+zagatBinary <- read.csv( '/home/bonzilla/Documents/MSDS/DATA621/MichelinNY.csv' )
+glimpse( zagatBinary )
+```
+```{r}
+ggplot( aes( y  = InMichelin, x = Food, col = factor(InMichelin) ), data = zagatBinary ) +
+  geom_jitter( fill = NA, shape = 21, alpha = 0.5, size = 3, width = 0.1, height = 0.1 ) +
+  geom_smooth( method = 'glm', col = 'red', method.args = list( family = 'binomial'), se = F ) +
+  theme_classic() +
+  ylab( 'Included in Michelin?' ) +
+  xlab( 'Zagat Food Rating' ) +
+  ggtitle( 'In Michelin Guide ~ Food Rating' )
+```
+
+```{r}
+zagatbinary_mod <- glm( InMichelin ~ Food, family = binomial, zagatBinary )
+summary( zagatbinary_mod )
+```
+Notice that the coefficients are the same, but the AIC and deviance are completely different
+
+
+#### Deviance for the case of Binary Data
+The distribution of the difference in deviances is approximately $\chi^2$
+
+#### Residuals for Binary Data  
+```{r}
+zagatBinary_res <- data.frame( 'Food' = zagatBinary$Food ) %>%
+  mutate( stPearson = resid(zagatbinary_mod, type='pearson')/sqrt(1 - hatvalues(zagatbinary_mod)),
+          stDeviance = rstandard( zagatbinary_mod ) )
+
+p1 <- ggplot( data = zagatBinary_res, aes( x = stDeviance, y = Food ) ) +  
+  geom_point( fill = NA, shape = 21, alpha = 0.3, size = 3 ) +
+  theme_classic() +
+  ylab( 'Food Rating' ) +
+  ggtitle( 'Standardized Deviance Residuals' )
+p2 <- ggplot( data = zagatBinary_res, aes( x = stPearson, y = Food ) ) +  
+  geom_point( fill = NA, shape = 21, alpha = 0.3, size = 3 ) +
+  theme_classic() +
+  ylab( 'Food Rating' ) +
+  ggtitle( 'Standardized Pearson Residuals' )
+  
+grid.arrange( p1, p2, ncol = 2 )
+```
+There are some similar and highly random patterns here. Residual plots are very problematic for binary data!
+
+#### Transforming Predictors in Logistic Regression for Binary Data.
+When the predictor variable $X$ is normally distributed with a different variance for the two values of $Y$, the log odds are a quadratic function of $x$  
+When the predictor variable $X$ is normally distributed with the same variance for the two values of $Y$, the log odds are a linear function of $x$
+
+Transforming skewed predictor variables....
+```{r}
+p1 <- ggplot( data = zagatBinary, aes( x = factor( InMichelin ), y = Food ) ) +
+  geom_boxplot() +
+  theme_classic()
+p2 <- ggplot( data = zagatBinary, aes( x = factor( InMichelin ), y = Decor  ) ) +
+  geom_boxplot() +
+  theme_classic()
+p3 <- ggplot( data = zagatBinary, aes( x = factor( InMichelin ), y = Service ) ) +
+  geom_boxplot() +
+  theme_classic()
+p4 <- ggplot( data = zagatBinary, aes( x = factor( InMichelin ), y = Price ) ) +
+  geom_boxplot() +
+  theme_classic()
+
+grid.arrange( p1, p2, p3, p4, ncol = 2 )
+```
+Let's consider the following logistic regression model with these 4 predictors:
+$$\theta(x)=\frac{0}{1+ exp(-(\beta_0 + \beta_1x_1 + \beta_2x_2 + \beta_3x_3 + \beta_4x_4 + \beta_5log(x_4))}$$
+
+
+#### Marginal Model plots for Binary Data
+residual plots are difficult to interpret, but marginal model plots are an alternative...
+
+```{r message=FALSE}
+#glimpse( zagatBinary )
+zagatbinary_fullmod <- glm( InMichelin ~ Food + Decor + Service + Price + log(Price), family = binomial, zagatBinary )
+mmps( zagatbinary_fullmod )
+```
+
+The plots of Service and Decor don't track as well with the data as the other features. Here we add a term to the model to look at interaction effects between the two variables:
+
+```{r}
+zagatbinary_fullmod2 <- glm( InMichelin ~ Food + Decor + Service + Price + log( Price ) + Service:Decor, family = binomial, zagatBinary )
+mmps( zagatbinary_fullmod2 )
+```
+
+```{r}
+anova( zagatbinary_fullmod, zagatbinary_fullmod2 )
+```
+Look at the summary for our new model:
+```{r}
+summary( zagatbinary_fullmod2 )
+```
+
+Price is not very significant here, so lets simplify the model a bit:
+```{r}
+zagatbinary_fullmod3 <- glm( InMichelin ~ Food + Decor + Service + log( Price ) + Service:Decor, family = binomial, zagatBinary )
+summary( zagatbinary_fullmod3 )
+mmps( zagatbinary_fullmod3 )
+```
+The marginal plots show reasonable agreement and all the model terms are significant at least up to $\alpha$ = 0.05.
+
+
+####
+
+
+
 
 
 <br><br><br>
