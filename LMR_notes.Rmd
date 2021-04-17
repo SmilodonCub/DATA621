@@ -9,6 +9,9 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+<a href="https://github.com/SmilodonCub/DATA621" class="github-corner" aria-label="View source on GitHub"><svg width="80" height="80" viewBox="0 0 250 250" style="fill:#70B7FD; color:#fff; position: absolute; top: 0; border: 0; right: 0;" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a><style>.github-corner:hover .octo-arm{animation:octocat-wave 560ms ease-in-out}@keyframes octocat-wave{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-25deg)}40%,80%{transform:rotate(10deg)}}@media (max-width:500px){.github-corner:hover .octo-arm{animation:none}.github-corner .octo-arm{animation:octocat-wave 560ms ease-in-out}}</style>
+
+
 The following are notes from readings in ['Linear Models with `R`'](https://www.routledge.com/Linear-Models-with-R/Faraway/p/book/9781439887332) by Julian Faraway for the course DATA621, 'Business Analystics and Data Mining' as part of the [Masters of Science in Data Science program at CUNY SPS](https://sps.cuny.edu/academics/graduate/master-science-data-science-ms).
 
 `R` libraries used:
@@ -34,6 +37,9 @@ library( ggcorrplot )
 library( leaps )
 library( pls )
 library( lars )
+library( nlme )
+library( mgcv )
+library( quantreg )
 ```
 
 ## Introduction
@@ -2270,7 +2276,7 @@ Choosing a model that optimizes a criterion.
 but we don't know $f$. sad face.  ...
 **Akaike Information Criterion**: $AIC = -2L(\hat{\theta}) +2p$  
 Choose the model that minimizes the AIC. AIC naturally balances between fit and simplicity in model selection  
-**Bayed Information Criterion** (BIC)
+**Bayes Information Criterion** (BIC)
 
 ```{r}
 b <- regsubsets( Life.Exp ~ ., data = statedata )
@@ -2513,10 +2519,166 @@ sum( predlars$coef != 0 )
 ```
 
 
+## Problems with the Error
+When errors are dependent, we can use generalized least squares (GLS). When errors in independent but not identically distributed, we can use weighted least squares (WLS), which is a special case of GLS
+
+### Generalized Least Squares
+Sometimes errors have non-constant variance or are correlated. Ex: may find evidence of serial correlation by looking at the residuals as in this global warming dataset
+
+```{r}
+data( globwarm, package = 'faraway' )
+gwarm_mod <- lm( nhtemp ~ wusa + jasper + westgreen + chesapeake + 
+                   tornetrask + urals + mongolia + tasman, 
+                 data = globwarm )
+sumary( gwarm_mod )
+```
+```{r}
+cor( residuals( gwarm_mod)[-1], residuals( gwarm_mod )[-length( residuals( gwarm_mod ))])
+```
+use a GLS fitting function:
+```{r}
+gwarm_glmod <- gls( nhtemp ~ wusa + jasper + westgreen + chesapeake + 
+                   tornetrask + urals + mongolia + tasman, 
+                   correlation = corAR1( form = ~year ),
+                 data = na.omit( globwarm ))
+summary( gwarm_glmod )
+```
+
+```{r}
+intervals( gwarm_glmod, which = "var-cov")
+```
+There is significant positive correlation  
+
+**Compound Symmetry Assumption**: Another example is where observations within blocks might have errors which are correlated
+```{r}
+data( oatvar, package = 'faraway' )
+oat_glmod <- gls( yield ~ variety, oatvar, correlation = corCompSymm( form = ~1 | block ) )
+intervals( oat_glmod )
+```
+other examples of correlated error - spatial data where the relative locations of the observations can be used to model the error correlation.
 
 
+### Weighted Least Squares
+WLS can be used in special cases where the errors are uncorrelated, but have unequal variance where the form of the inequality is known.  
+
+French Election data:
+```{r}
+data( fpe, package = 'faraway' )
+vote_mod <- lm( A2 ~ A + B + C + D + E + F + G + H + J + K + N-1, fpe, weights = 1/EI )
+coef( vote_mod )
+```
+
+Solution to the constrained least squares problem which requires 0:1
+```{r}
+M <- list( w=1/fpe$EI, X = model.matrix( vote_mod ), y = fpe$A2, 
+           Ain = rbind(diag(11),-diag(11)),
+           C = matrix(0,0,0), array(0,0), S=list(),
+           off=NULL, p=rep(0.5,11), bin = c(rep(0,11),rep(-1,11)))
+a <- pcls( M )
+names( a ) <- colnames( model.matrix( vote_mod ) )
+round( a,3 )
+```
 
 
+### Testing for Lack of Fit
+How can we tell whether a model fits the data? We need to make a comparison to some model-free estimate of $\sigma^2$
+
+```{r}
+data( corrosion, package = 'faraway' )
+plot( loss ~ Fe, corrosion, xlab = "Iron content", ylab = "Weight loss" )
+corrosion_lmod <- lm( loss ~ Fe, data = corrosion )
+abline( coef( corrosion_lmod ) )
+```
+fit a model that researves a parameter for each group of data with the same value of x
+```{r}
+corrosion_group_lmod <- lm( loss ~ factor( Fe ), data = corrosion )
+plot( loss ~ Fe, corrosion, xlab = "Iron content", ylab = "Weight loss" )
+points( corrosion$Fe, fitted( corrosion_group_lmod ), pch = 3 )
+abline( coef( corrosion_lmod ) )
+anova( corrosion_lmod, corrosion_group_lmod )
+```
+
+Fit the same data with a 6th order polynomial
+```{r}
+corrosion_6ord <- lm( loss ~ Fe + I(Fe^2) + + I(Fe^3) + + I(Fe^4) + + I(Fe^5) + + I(Fe^6),
+                      data = corrosion )
+plot( loss ~ Fe, data=corrosion, ylim= c(60,130))
+points( corrosion$Fe, fitted( corrosion_group_lmod ), pch=3 )
+grid <- seq( 0,2,len=50 )
+lines( grid, predict( corrosion_6ord, data.frame( Fe=grid)))
+```
+```{r}
+summary( corrosion_6ord )$r.squared
+```
+The fit is fantastic! wait....this is ridiculous
+
+
+### Robust Regression
+Compare Least Squares to Huber's method  
+```{r}
+data( gala, package = 'faraway' )
+gal_lsmod <- lm( Species ~ Area + Elevation + Nearest + Scruz + Adjacent, data = gala )
+sumary( gal_lsmod )
+```
+```{r}
+gal_rlmod <- rlm( Species ~ Area + Elevation + Nearest + Scruz + Adjacent, data = gala )
+summary( gal_rlmod )
+```
+```{r}
+wts <- gal_rlmod$w
+names( wts ) <- row.names( gala )
+head( sort( wts ), 10 )
+```
+
+LAD regression
+```{r}
+gal_LADmod <- rq( Species ~ Area + Elevation + Nearest + Scruz + Adjacent, data = gala )
+summary( gal_LADmod )
+```
+
+Least Trimmed Squares - for really big large errors (poorly entered data?)
+```{r}
+set.seed( 123 )
+gal_ltsmod <- ltsreg( Species ~ Area + Elevation + Nearest + Scruz + Adjacent, data = gala )
+coef( gal_ltsmod )
+```
+Bootstrapped LTS
+```{r}
+bcoef <- matrix( 0, 1000, 6 )
+for( i in 1:1000 ){
+  newy <- predict( gal_ltsmod ) + residuals( gal_ltsmod )[sample( 30, rep=T)]
+  brg <- ltsreg( newy ~ Area + Elevation + Nearest + Scruz + Adjacent, 
+                 data = gala, nsamp = "best" )
+  bcoef[i,] <- brg$coef
+}
+```
+
+make a 95% confidence interval
+```{r}
+colnames( bcoef ) <- names( coef( gal_ltsmod ) )
+apply( bcoef, 2, function(x) quantile( x, c( 0.025, 0.975 ) ) )
+```
+
+plot the densities
+```{r}
+bcoef <- data.frame( bcoef )
+p1 <- ggplot( bcoef, aes( x = Area ) ) +
+  geom_density() +
+  xlim( 1.45, 1.65 ) +
+  geom_vline( xintercept = c( 1.4976, 1.6230 ), linetype = "dashed" )
+p2 <- ggplot( bcoef, aes( x = Adjacent ) ) +
+  geom_density() +
+  xlim( -0.25, -0.13 ) +
+  geom_vline( xintercept = c( -0.23375, -0.15138 ), linetype = 'dashed' )
+
+grid.arrange( p1, p2, ncol = 2 )
+```
+Summary  
+
+* Robust estimators provide protection against long-tailed error
+* Robust estimates supply coefficients and possibly SE by way of bootstrap or other methods
+* Robust methods can be used in addition to least squares as a confirmatory method
+* Robust estimates are useful when data need to be fit automatically
 
 
 
