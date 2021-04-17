@@ -9,6 +9,9 @@ output:
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
+
+<a href="https://github.com/SmilodonCub" class="github-corner" aria-label="View source on GitHub"><svg width="80" height="80" viewBox="0 0 250 250" style="fill:#70B7FD; color:#fff; position: absolute; top: 0; border: 0; right: 0;" aria-hidden="true"><path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path><path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path><path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path></svg></a><style>.github-corner:hover .octo-arm{animation:octocat-wave 560ms ease-in-out}@keyframes octocat-wave{0%,100%{transform:rotate(0)}20%,60%{transform:rotate(-25deg)}40%,80%{transform:rotate(10deg)}}@media (max-width:500px){.github-corner:hover .octo-arm{animation:none}.github-corner .octo-arm{animation:octocat-wave 560ms ease-in-out}}</style>
+
 The following are notes from readings in ['A Modern Approach to Regression with `R`'](https://link.springer.com/book/10.1007/978-0-387-09608-7) by Simon Sheather for the course DATA621, 'Business Analystics and Data Mining' as part of the [Masters of Science in Data Science program at CUNY SPS](https://sps.cuny.edu/academics/graduate/master-science-data-science-ms).
 
 `R` libraries used:
@@ -21,6 +24,8 @@ library( tidyverse )
 library( gclus )
 library( car )
 library( VGAM )
+library( MASS )
+library( MuMIn )
 ```
 
 ## Introduction
@@ -884,7 +889,215 @@ Given the ANOVA p-val, there is little evidence to reject the null hypothesis (n
 
 ## Diagnostics and Transformations for Multiple Linear Regression
 
+
+
+
 ## Variable Selection
+choosing the 'best' model from a class of multiple regression models using what are called variable selection methods.  
+
+In general, the more predictor variables included in a valid model the lower the bias in the predictions, but the higher the variance. Including too many variables in a regression model is commonly called over-fitting while the opposite is called under-fitting.
+
+*"If the main interest is in finding an interpretable model or in identifying the 'true' underlying model as closely as possible, prediction accuracy is of secondary importance (to variable selection)....On the other hand, if prediction is the focus of interest, it is usually acceptable for the selected model to contain some extra variables, as long as the coefficients of those variables are small"*
+
+### Evaluating Potential Subsets of Predictor Variables
+4 criteria to evaluate subsets of predictor variables 
+
+#### the $R^2_{adj}$ criterion
+Choosing the subset of predictors that has the highest values of $R^2_{adj}$ tends towards over-fitting
+
+#### AIC, Akaike's Information Criterion
+The smaller the value of AIC, the better the model
+
+#### $\mbox{AIC}_C$: Corrected AIC
+a bias corrected version of AIC that has a larger penalty for model complexity: good for small sample sizes
+
+#### BIC: Bayesian Information Criterion
+the smaller the value of BIC, the better. higher penalty for model complexity that AIC.
+
+**What to do?!?**: a popular data strategy is to calculate $R^2_{adj}$, AIC, $\mbox{AIC}_C$, and BIC and compare the results for models then select by which minimizes AIC, $\mbox{AIC}_C$, and BIC and maximizes $R^2_{adj}$.
+
+
+### Deciding on the Collection of Potential Subsets of Predictor Variables
+
+#### All possible subsets
+Consider all $2^m$ possible equations and identify the subsets of the predictors of a given size that maximizes a measure of fit or minimizes an information criterion
+
+Example: Bridge Construction
+```{r}
+bridge <- read.csv( 'bridge.csv', sep = '\t' )
+glimpse( bridge )
+```
+```{r}
+bridge_mod <- lm( data = bridge, log( Time ) ~ log( DArea ) + 
+                    log( CCost ) + log( Dwgs ) + log( Length ) + log( Spans ) )
+bridge_mod_sum <- summary( bridge_mod )
+bridge_mod_sum
+```
+The model is statistically highly significant, but not all the features are.
+
+#### Stepwise Subsets
+**Backwards elimination** - start with all predictors in the regression model and successively delete predictors that have either the lower information criterion or the highest p-value until either all predictors are removed or the information criterion increases.
+
+```{r}
+backwards_bridge <- stepAIC( bridge_mod, direction = 'backward' )
+backwards_bridge
+```
+
+**Forward selection** - start with nothing. at each step, add a predictor and select the mod with the lowest p-val/highest information criterion. repeat until there are no more variables to add or the information decreases/p-val increases.
+```{r}
+bridge_mod2 <- lm( log( Time ) ~ 1, data=bridge)
+forwards_bridge <- stepAIC( bridge_mod, direction = 'forward' )
+forwards_bridge
+```
+
+
+
+### Assession the Predictive Ability of Regression Models
+Assess the predictive ability of different regression models by evaluating their performance on a new data set.  
+To do this, randomly split the data into a training data set and a testing data set.  
+
+Example: predicting the log(cancer volume), or `lacavol` from assorted prostate cancer feature variables.  
+
+
+
+
+#### STEP 1: Model Building Using the Training Data Set
+```{r}
+prostateTraining <- read.csv( 'prostateTraining.csv' , sep = '\t' )
+glimpse( prostateTraining )
+```
+
+```{r}
+pairs( ~lpsa + lcavol + lweight + age + lbph + svi + lcp + gleason + pgg45, data = prostateTraining )
+```
+
+There aren't any obvious signs of nonlinearity, so move forward with a kitchen sink model:
+```{r}
+prostate_mod <- lm( lpsa ~ lcavol + lweight + age + lbph + svi + lcp + gleason + pgg45, data = prostateTraining )
+summary( prostate_mod )
+```
+
+Now to look at a scatterplot of the standardized residuals for each predictor....
+```{r}
+standard_residuals_prostate <- rstandard( prostate_mod )
+glimpse( standard_residuals_prostate )
+prostateTraining_res <- cbind( prostateTraining, standard_residuals_prostate, fitted( prostate_mod ) )
+glimpse( prostateTraining_res )
+```
+
+```{r}
+prostateTraining_res_plot <- prostateTraining_res %>%
+  pivot_longer( cols = c( lcavol, lweight, age, lbph,  svi,  lcp,  gleason, pgg45, `fitted(prostate_mod)` ), names_to = 'names', values_to = 'val' )
+
+ggplot( data = prostateTraining_res_plot, aes( x = standard_residuals_prostate, y = val ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  facet_wrap( ~ names, scales = 'free' ) +
+  theme_classic()
+```
+Random patterns, no sign of nonlinear trend.  
+OK, now to look at the target variable against the fitted values:
+```{r}
+ggplot( data = prostateTraining_res, aes( x = `fitted(prostate_mod)`, y = lpsa ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  geom_smooth( method = 'lm', se = F, col = 'black' ) +
+  theme_classic()
+```
+
+We see that there is a reasonable linear fit.  
+Now to plot the model diagnostics: 
+```{r}
+plot( prostate_mod )
+```
+Diagnostics appear reasonable....
+
+Now the marginal model plots: 
+```{r message=F}
+mmps( prostate_mod )
+```
+The curves in the marginal model plot match pretty well; this supports the model's validity  
+
+Now to look at the added variable plots
+```{r}
+
+avPlots( prostate_mod, marginal.scale=TRUE, ellipse=list(levels=0.5)) 
+```
+Case 45 stands out for `lweight` & should be investigated  
+Otherwise, let's go ahead and assume this is a valid model.  
+
+Compute the variance inflation factor
+```{r}
+vif( prostate_mod )
+```
+We can see that none of these are higher than 5, so we don't need to be concerned about colinearity
+
+see what results from stepAIC elimination
+```{r}
+stepAIC( prostate_mod, direction = 'backward' )
+```
+The best AIC likes using 7 predictors: lpsa ~ lcavol + lweight + age + lbph + svi + lcp + pgg45
+
+Try AICc  ?not working?
+```{r}
+AICc( prostate_mod )
+AICc( lm( lpsa ~ lcavol + lweight + age + lbph + svi + lcp + pgg45, data = prostateTraining ) )
+AICc( lm( lpsa ~ lcavol + lweight + lbph + svi + lcp + pgg45, data = prostateTraining ) )
+AICc( lm( lpsa ~ lcavol + lweight + lbph + svi + pgg45, data = prostateTraining ) )
+AICc( lm( lpsa ~ lcavol + lweight + lbph + svi, data = prostateTraining ) )
+AICc( lm( lpsa ~ lcavol + lweight + svi, data = prostateTraining ) )
+AICc( lm( lpsa ~ lcavol + lweight, data = prostateTraining ) )
+AICc( lm( lpsa ~ lcavol, data = prostateTraining ) )
+```
+corrected AIC prefers 4 terms: lpsa ~ lcavol + lweight + lbph + svi
+
+```{r}
+stepAIC( prostate_mod, k = log( nrow( prostateTraining ) ) )
+```
+The BIC prefers just 2 predictors: lpsa ~ lcavol + lweight
+
+Let's look at the summaries for both of these 2 models:
+```{r}
+summary( lm( lpsa ~ lcavol + lweight + age + lbph + svi + lcp + pgg45, data = prostateTraining ) )
+```
+```{r}
+summary( lm( lpsa ~ lcavol + lweight + lbph + svi, data = prostateTraining ) )
+```
+
+
+
+```{r}
+summary( lm( lpsa ~ lcavol + lweight, data = prostateTraining ) )
+```
+ready for next step: how do these perform on new data....
+
+#### STEP 2: Model Comparison Using the Test Data 
+```{r}
+prostateTest <- read.csv( 'prostateTest.csv' , sep = '\t' )
+glimpse( prostateTest )
+```
+
+
+Try each of the models with the test data:
+```{r}
+summary( lm( lpsa ~ lcavol + lweight + age + lbph + svi + lcp + pgg45, data = prostateTest ) )
+```
+```{r}
+summary( lm( lpsa ~ lcavol + lweight + lbph + svi, data = prostateTest ) )
+```
+```{r}
+summary( lm( lpsa ~ lcavol + lweight, data = prostateTest ) )
+```
+YIKES!, none of this looks very convincing....  
+
+....now to revisit the outlier of CASE45
+most of this issue is due to the dataset being too small. would need to really evaluate the outliers like case45. Is it a 'real' datapoint? can you justify eliminating it?....
+
+
+### Recent Development in Variable Selection - LASSO
+**L**east **A**bsolute **S**hrinkage and **S**election **O**perator  
+LASSO performs variable selection and regression coefficient estimation simultaneously.  
+ise BIC to find the optimal LASSO model when sparsity is a concern.  
+
+![](flowChart.png)
 
 ## Logistic Regression
 
@@ -1119,7 +1332,32 @@ mmps( zagatbinary_fullmod3 )
 The marginal plots show reasonable agreement and all the model terms are significant at least up to $\alpha$ = 0.05.
 
 
-####
+## Weighted Least Squares
+WLS - an alternative way to cope with nonconstant error variance.
+
+### Straight-Line Regression Based on WLS
+```{r}
+cleaning <- read.csv( 'cleaning.csv', sep = '\t' )
+glimpse( cleaning )
+```
+
+```{r}
+cleaning_lm <- lm( Rooms ~ Crews, data = cleaning )
+summary( cleaning_lm )
+```
+```{r}
+wts <- 1/fitted( lm( abs( residuals( cleaning_lm ) ) ~ cleaning$Crews ) )^2
+cleaning_wgtlm <- lm( Rooms ~ Crews, weights = wts, data = cleaning )
+summary( cleaning_wgtlm )
+```
+
+Predicting Intervals for Weighted Least Squares
+$$\sqrt{(\hat{\sigma^2/w * \mbox{sefit}(y|X=x^*)^2})}$$
+Leverage for WLS ... if all weights are equal WLS = LS (what's the point of this exercise)
+
+Using least squares to calculate weights least squares...  
+
+The use of weighted least squares: best in special cases where $Y_i$ is the average or median of $n_i$ observations such that $Var(Y_i)\propto \frac{1}{n_i}$. In this case we take $w_i=n_i$.
 
 
 

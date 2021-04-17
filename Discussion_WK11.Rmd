@@ -1,0 +1,119 @@
+---
+title: 'Modelling Daily US COVID deaths'
+subtitle: 'Discussion Week 11 DATA621'
+author: 'Bonnie Cooper'
+output:
+  rmdformats::downcute
+---
+
+Attempting autoregression to model the US Daily COVID Deaths.  
+Will demonstrate an Ordinary Least Squares (OLS) approach and a Generalized Least Squares (GLS) models.  
+How can I improve my approach here? ....
+
+
+## Importing the data
+start with taking a look at the dataset `us_covid19_daily.csv` which is freely available for download from [kaggle](https://www.kaggle.com/sudalairajkumar/covid19-in-usa?select=us_covid19_daily.csv).
+```{r message=FALSE}
+library( dplyr )
+library( ggplot2 )
+library( nlme )
+df <- read.csv( '/home/bonzilla/Documents/MSDS/DATA621/us_covid19_daily.csv')
+df <- transform(df, date = as.Date(as.character(date), "%Y%m%d"))
+glimpse( df )
+```
+
+When we visualize the daily increase in deaths, the weekly cyclical behavior of the data is obvious:
+```{r fig.cap="Daily COVID deaths in the US"}
+COVID_ddp <- ggplot( df, aes( x = date, y = deathIncrease ) ) +
+  geom_line() +
+  theme_classic() +
+  ggtitle( 'Daily US COVID deaths' ) +
+  ylab( 'daily COVID deaths' )
+COVID_ddp
+```
+
+To try to capture this behavior I apply the same autoregression method from LMR section 4.3.
+```{r}
+lagdeaths <- embed( df$deathIncrease, 9 )
+colnames( lagdeaths ) <- c( 'death', paste0('lag',1:8) )
+lagdeaths <- data.frame( lagdeaths )
+glimpse( lagdeaths )
+```
+
+## Autoreggressive Model Fit
+
+Fit a linear model that incorporates the lagged values as an autoregressive process
+```{r}
+armod <- lm( death ~ lag1 + lag7 + lag8, lagdeaths )
+summary( armod )
+```
+
+All three of the lagged variables are strongly significant and the $R^2$ value suggests that the model accounts for for quite a bit of the variance in the data.  
+
+Now to visualize the model fit with the data:
+```{r fig.cap="Autoregression of Daily Death that considers several past time points. OLS = red, data = black"}
+death_lag <- df[9:320,]
+death_lag[ 'predict' ] <- predict( armod ) 
+COVID_ddp_ar <- COVID_ddp +
+  geom_line( aes( x = date, y = predict, color = 'red' ), data = death_lag, show.legend = FALSE )
+COVID_ddp_ar
+```
+
+The the autoregressive linear model prediction follows the envelope of the data reasonably well.
+
+## OLS Model Fit
+```{r}
+armod_ols <- lm( deathIncrease ~ hospitalizedCurrently + 
+                    inIcuCurrently + onVentilatorCurrently +
+                    hospitalizedIncrease + negativeIncrease + positiveIncrease +
+                    totalTestResultsIncrease + positive + negative + recovered + 
+                   death + hospitalized + totalTestResults, 
+                  data = df )
+summary( armod_ols )
+```
+```{r fig.cap="Standard OLS linear regression fit for daily US COVID deaths. OLS = blue, autoreg = red, data = black"}
+df2 <- df[-armod_ols$na.action, ]
+death_lag2 <- df2
+death_lag2[ 'predict_ols' ] <- predict( armod_ols ) 
+COVID_ddp_ols <- COVID_ddp +
+  geom_line( aes( x = date, y = predict ), data = death_lag, show.legend = FALSE, color = 'red', size = 0.2 ) +
+  geom_line( aes( x = date, y = predict_ols ), data = death_lag2, show.legend = FALSE, color = "blue", size = 1 ) 
+COVID_ddp_ols
+```
+
+## GLS Model Fit
+
+```{r}
+armod_gls <- gls( deathIncrease ~ hospitalizedCurrently + 
+                    inIcuCurrently + onVentilatorCurrently +
+                    hospitalizedIncrease + negativeIncrease + positiveIncrease +
+                    totalTestResultsIncrease + positive + negative + recovered + 
+                    death + hospitalized + totalTestResults, 
+                  correlation = corAR1( form = ~ 1 ),
+                  data = na.omit( df ) )
+summary( armod_gls )
+```
+```{r fig.cap="GLS fit for daily US COVID deaths. GLS = green, OLS = blue, autoreg = red, data = black"}
+death_lag3 <- na.omit( df )
+death_lag3[ 'predict_gls' ] <- predict( armod_gls ) 
+COVID_ddp_gls <- COVID_ddp +
+  geom_line( aes( x = date, y = predict ), data = death_lag, show.legend = FALSE, color = 'red', size = 0.2 ) +
+  geom_line( aes( x = date, y = predict_ols ), data = death_lag2, show.legend = FALSE, color = "blue", size = 0.2 ) +  
+  geom_line( aes( x = date, y = predict_gls ), data = death_lag3, show.legend = FALSE, color = 'green', size = 1 ) 
+COVID_ddp_gls
+```
+
+...and that is where I've left off  
+
+What are some next steps?  
+
+1. combine the lagged features from the 1st autoregression with the original data for another OLS approach
+2. am I using the `gls()` function correctly?...will RTFM to see if I can make improvements with that approach
+3. ....any siggestions?....
+4. comparing models
+
+
+
+
+
+<br><br><br>

@@ -421,7 +421,7 @@ dicentric_mod_countr <- glm( ca ~ log( cells ) + log( doserate )*dosef,
 summary( dicentric_mod_countr )
 ```
 
-Now to use a implement a **Rate Model**, we use an offset to correct the coefficient to 1. this makes things much more directly interpritable for the model:
+Now to use a implement a **Rate Model**, we use an offset to correct the coefficient to 1. this makes things much more directly interpretable for the model:
 ```{r}
 dicentric_ratemod <- glm( ca ~ offset( log( cells ) ) + log( doserate )*dosef,
                           family = poisson, dicentric )
@@ -459,6 +459,34 @@ solder_mod_negbin2 <- glm.nb( skips ~ ., solder )
 summary( solder_mod_negbin2 )
 ```
 
+```{r}
+data( ships, package = 'MASS' )
+glimpse( ships )
+summary( ships )
+```
+```{r}
+# exclude ships with 0 months of service
+ships2 <- subset(ships, service > 0)
+# convert the period and year variables to factors
+ships2$year <- as.factor(ships2$year)
+ships2$period <- as.factor(ships2$period)
+summary( ships2 )
+
+ggplot( data = ships2, aes( x = incidents ) ) +
+  geom_bar() +
+  theme_classic() +
+  ggtitle( "Ship Damage Data", subtitle = 'damage caused by waves to cargo vessels at sea')
+```
+
+```{r}
+# consider a log-linear model including all the variables
+# "offset" means a term with a fixed coefficient of 1
+glm1 <- glm(incidents ~ type + year + period, 
+    family = poisson(link = "log"), data = ships2, offset = log(service))
+summary(glm1)
+par(mfrow=c(2,2))
+plot(glm1)
+```
 
 
 
