@@ -26,6 +26,7 @@ library( car )
 library( VGAM )
 library( MASS )
 library( MuMIn )
+library( nlme )
 ```
 
 ## Introduction
@@ -1360,7 +1361,220 @@ Using least squares to calculate weights least squares...
 The use of weighted least squares: best in special cases where $Y_i$ is the average or median of $n_i$ observations such that $Var(Y_i)\propto \frac{1}{n_i}$. In this case we take $w_i=n_i$.
 
 
+## Serially Correlated Errors
 
+**Serial Correlation** - results from the current time period are correlated with results from earlier time periods.
+
+### Autocorrelation
+
+```{r}
+confood2 <- read.csv( 'confood2.csv', sep = '\t' )
+glimpse( confood2 )
+```
+```{r}
+p1 <- ggplot( data = confood2, aes( x = log( Price ), y = log( Sales ), col = factor( Promotion ) ) ) +
+  geom_point() +
+  theme_classic()
+p2 <- ggplot( data = confood2, aes( x = Week, y = log( Sales ) ) ) +
+  geom_line() +
+  geom_point( aes( x = Week, y = log( Sales ), col = factor( Promotion ) ) ) +
+  theme_classic()
+grid.arrange( p1, p2, ncol = 1 )
+```
+Fig1 - gives the appearance that there is a linear relationship between log(Sales) and log(Price)
+Fig2 - log( Sales ) in week t are positively correlated with log( Sales ) in week t-1
+
+```{r}
+confood2$SalesLag1 <- NA
+confood2$SalesLag1[1:51] <- confood2$Sales[2:52]
+ggplot( data = confood2, aes( x = log( Sales ), y = log( SalesLag1 ), na.rm = T ) ) +
+  geom_point( ) +
+  theme_classic()
+```
+
+Fig3 - **lag 1 autocorrelation** there is a positive correlation between log(Sales) in week t and log(Sale) in week t-1
+
+looking at the rest of the lags:
+```{r}
+acf( confood2$Sales, lag.max = 20, plot = T )
+```
+We can see from the figure above that lag1 is over 2 SE, so the previous week's sale affect the next
+
+#### What happens if you ignore autocorrelation in the data:
+```{r}
+confood2_lm <- lm( data = confood2, log( Sales ) ~ log( Price ) + Week )
+confood2_lm_res <- rstandard( confood2_lm )
+confood2_lm_res_vals <- cbind( confood2, confood2_lm_res, fitted( confood2_lm ) )
+glimpse( confood2_lm_res_vals )
+```
+
+```{r}
+confood2_lm_res_plot <- confood2_lm_res_vals %>%
+  mutate( Price == log( Price ) ) %>%
+  pivot_longer( cols = c( Week, Sales, Price, Promotion, SalesLag1, `fitted(confood2_lm)` ), names_to = 'names', values_to = 'val' ) 
+glimpse( confood2_lm_res_plot )
+
+ggplot( data = confood2_lm_res_plot, aes( y = confood2_lm_res, x = val ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  facet_wrap( ~ names, scales = 'free' ) +
+  theme_classic()
+```
+
+
+### Using Generalized Least Squares when the errors are AR(1)
+Generalized Least Squares - allows errors to be autocorrelated
+Using Least Squares and ignorring autocorrelation when it exists will result in consistent estimates of $\beta_1$ but incorrect estimates of the variance of $\hat{\beta}_{ILS}$ invalidating resulting confidence intervals and hypothesis tests.
+
+```{r}
+confood2_gls <- gls( log( Sales ) ~ log( Price ) + Week + Promotion, 
+                     data = confood2, 
+                     correlation = corAR1(form =~Week),
+                     method = "ML" )
+summary( confood2_gls )
+```
+
+```{r}
+acf( confood2_gls$residuals, lag.max = 20, plot = T )
+```
+
+#### A General Approach to Transforming GLS into LS
+I could not figure out how to do this from the text
+```{r}
+#R output on page 318
+g <- lm(log(Sales)~log(Price)+Promotion+Week,data=confood2)
+rho <- 0.5504
+x <- model.matrix(g)
+Sigma <- diag(length(confood2$Week))
+Sigma <- rho^abs(row(Sigma)-col(Sigma))
+sm <- chol(Sigma)
+smi <- solve(t(sm))
+xstar <- smi %*% x
+ystar <- smi %*% log(confood2$Sales)
+m1tls <- lm(ystar ~ xstar-1) 
+summary(m1tls)
+```
+```{r}
+#Figure 9.8 on page 318
+par(mfrow=c(2,2))
+plot(xstar[,1],ystar,xlab="Intercept*",ylab="log(Sales)*")
+identify(xstar[,1],ystar,confood2$Week)
+plot(xstar[,2],ystar,xlab="log(Price)*",ylab="log(Sales)*")
+identify(xstar[,2],ystar,confood2$Week)
+plot(xstar[,3],ystar,xlab="Promotion*",ylab="log(Sales)*")
+identify(xstar[,3],ystar,confood2$Week)
+plot(xstar[,4],ystar,xlab="Week*",ylab="log(Sales)*")
+identify(xstar[,4],ystar,confood2$Week)
+```
+
+```{r}
+#Figure 9.9 on page 319
+StanRes1 <- rstandard(m1tls)
+par(mfrow=c(1,1))
+acf(StanRes1,main="Series Standardized LS Residuals")
+
+```
+```{r}
+#Figure 9.10 on page 320
+par(mfrow=c(2,2))
+plot(xstar[,2],StanRes1,ylab="Standardized LS Residuals",xlab="log(Price)*")
+plot(xstar[,4],StanRes1,ylab="Standardized LS Residuals",xlab="Week*",type='o')
+identify(xstar[,4],StanRes1,labels=confood2$Week,cex=0.75)
+plot(xstar[,3],StanRes1,ylab="Standardized LS Residuals",xlab="Promotion*")
+plot(m1tls$fitted.values,StanRes1,ylab="Standardized LS Residuals",xlab="Fitted Values*")
+```
+
+```{r}
+#Figure 9.11 on page 320
+par(mfrow=c(2,2))
+plot(m1tls)
+abline(v=2*4/length(confood2$Week),lty=2)
+```
+
+
+### Case Study
+```{r}
+bayArea <- read.csv( 'BayArea.csv', sep = '\t' )
+glimpse( bayArea )
+```
+Matrix Plot: There are striking nonlinear patterns among the predictors
+```{r}
+pairs( ~ InterestRate + LoansClosed + VacancyIndex, data = bayArea )
+```
+Consider a naive linear model:
+```{r}
+bayArea_lm <- lm( data = bayArea, InterestRate ~ LoansClosed + VacancyIndex )
+summary( bayArea_lm )
+plot( bayArea_lm )
+```
+
+```{r}
+StanRes2 <- rstandard( bayArea_lm )
+par(mfrow=c(1,1))
+acf(StanRes2,main="Series Standardized LS Residuals")
+```
+
+```{r}
+bayArea_lm_res <- rstandard( bayArea_lm )
+bayArea_lm_res_vals <- cbind( bayArea, bayArea_lm_res, fitted( bayArea_lm ) )
+glimpse( bayArea_lm_res_vals )
+bayArea_lm_res_plot <- bayArea_lm_res_vals %>%
+  dplyr::select( LoansClosed, VacancyIndex, InterestRate, bayArea_lm_res, `fitted(bayArea_lm)` ) %>%
+  pivot_longer( cols = c( LoansClosed, VacancyIndex, InterestRate, `fitted(bayArea_lm)` ), names_to = 'names', values_to = 'val' ) 
+glimpse( bayArea_lm_res_plot )
+
+ggplot( data = bayArea_lm_res_plot, aes( y = bayArea_lm_res, x = val ) ) +
+  geom_point( fill = NA, shape = 21, alpha = 0.5, size = 3 ) +
+  facet_wrap( ~ names, scales = 'free' ) +
+  theme_classic()
+```
+
+Now a fit assuming AR(1)
+```{r}
+bayArea_gls <- gls( InterestRate ~ LoansClosed + VacancyIndex, 
+                     data = bayArea, 
+                     correlation = corAR1(form =~Month),
+                     method = "ML" )
+summary( bayArea_gls )
+```
+
+Now to for transformed versions of the variables:
+```{r}
+#R output on page 318
+g <- lm( InterestRate ~ LoansClosed + VacancyIndex, data=bayArea )
+rho <- 0.9572093
+x <- model.matrix(g)
+Sigma <- diag(length(bayArea$Month))
+Sigma <- rho^abs(row(Sigma)-col(Sigma))
+sm <- chol(Sigma)
+smi <- solve(t(sm))
+xstar <- smi %*% x
+ystar <- smi %*% log(bayArea$InterestRate)
+m1tls_2 <- lm(ystar ~ xstar-1) 
+summary(m1tls_2)
+```
+```{r}
+par(mfrow=c(2,2))
+plot(xstar[,1],ystar,xlab="Intercept*",ylab="InterestRate*")
+identify(xstar[,1],ystar,bayArea$Month)
+plot(xstar[,2],ystar,xlab="LoansClosed*",ylab="InterestRate*")
+identify(xstar[,2],ystar,bayArea$Month)
+plot(xstar[,3],ystar,xlab="VacancyIndex*",ylab="InterestRate*")
+identify(xstar[,3],ystar,bayArea$Month)
+plot(xstar[,2],xstar[,3],xlab="LoansClosed*",ylab="VacancyIndex*")
+identify(xstar[,2],xstar[,3],bayArea$Month)
+```
+
+```{r}
+StanRes1 <- rstandard(m1tls_2)
+par(mfrow=c(2,2))
+acf(StanRes1,main="Standardized LSResiduals")
+plot(xstar[,2],StanRes1,ylab="Standardized LS Residuals",xlab="LoansClosed*")
+identify(xstar[,2],StanRes1,bayArea$Month)
+plot(xstar[,3],StanRes1,ylab="Standardized LS Residuals",xlab="VacancyIndex*")
+identify(xstar[,3],StanRes1,bayArea$Month)
+plot(m1tls_2$fitted.values,StanRes1,ylab="Standardized Residuals",xlab="Fitted Values*")
+identify(m1tls_2$fitted.values,StanRes1,bayArea$Month)
+```
 
 
 <br><br><br>
