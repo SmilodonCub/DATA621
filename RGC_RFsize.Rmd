@@ -1,0 +1,29 @@
+---
+title: "Distinguishing Retinal Ganglion Cell Receptive Fields with Linear Regression in `R`"
+author: "Bonnie Cooper, PhD"
+output:
+  prettydoc::html_pretty:
+    theme: leonids
+---
+
+<img src="retina_xsec.png" width="100%" height="100%" />
+<div style="text-align: right"> *cross section of the retina illumunated by AAV-Brainbow labeling*  
+*- [Williams Lab](https://sites.wustl.edu/williams/gallery/) *</div>  
+
+<br>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Retinal Circuitry Crash Course
+
+
+## Retinal Ganglion Cells
+
+&nbsp;&nbsp;&nbsp;&nbsp;
+
+
+
+
+<br><br><br>
