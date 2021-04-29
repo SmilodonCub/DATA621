@@ -24,6 +24,7 @@ library( tidyverse )
 library( MASS )
 library( brglm2 )
 library( survival )
+library( nnet )
 ```
 
 
@@ -489,7 +490,199 @@ plot(glm1)
 ```
 
 
+## Multinomial Data
+an extension of the binomial to the situation where the response can take more than two values.  
+**Nomial Multinomial Data** - there is no natural order to the groups  
+**Ordinal Multinomial Data** - there is a natural order to the groups
 
+### Mulitnomial Logit Model  
+link the probabilities with the predictors while ensureing that the probabilities are restricted between 0 and 1.  
+
+```{r}
+data( nes96 )
+nes96 <- nes96 %>%
+  mutate( sPID = case_when( PID == 'strRep' ~ 'Republican',
+                            PID == 'indRep' ~ 'Independent',
+                            PID == 'weakRep' ~ 'Republican',
+                            PID == 'weakDem' ~ 'Democrat',
+                            PID == 'strDem' ~ 'Democrat',
+                            PID == 'indDem' ~ 'Independent',
+                            PID == 'indind' ~ 'Independent' ))
+glimpse( nes96 )
+nes96 %>% dplyr::select( sPID ) %>% table()
+```
+```{r}
+#convert income to a numeric variable
+inca <- c( 1.5, 4,6,8,9.5,10.5,11.5,12.5,13.5,14.5,16,18.5,21,23.5,27.5,32.5,37.5,42.5,47.5,55,67.5,82.5,97.5,115)
+nincome <- inca[unclass(nes96$income)]
+summary(nincome)
+table( nes96$educ)
+```
+
+```{r}
+matplot( prop.table( table( nes96$educ, nes96$sPID),1),
+         type = 'l', xlab = "Education", ylab = "Proportion",
+         lty = c(1,2,5))
+cutinc <- cut( nincome,7 )
+il <- c( 8, 26, 42, 58, 74, 90, 107 )
+matplot( il, prop.table(table(cutinc,nes96$sPID),1),
+         type = 'l', xlab = "Income", ylab = "Proportion",
+         lty = c(1,2,5))
+cutage <- cut( nes96$age, 7 )
+al <- c( 24,34,44,54,65,75,85 )
+matplot( al, prop.table(table(cutage,nes96$sPID),1), ,
+         type = 'l', xlab = "Age", ylab = "Proportion",
+         lty = c(1,2,5))
+```
+
+```{r}
+mmod <- multinom( sPID ~ age + educ + nincome, nes96 )
+```
+```{r}
+mmodi <- step(mmod)
+```
+
+fit a model without `educ` and compare the deviences:
+```{r}
+predict( mmodi, data.frame( nincome = il ), type = "probs")
+```
+
+```{r}
+summary(mmodi)
+```
+
+you can look at the logodds, but those are difficult to interpret 
+
+let's instead look at the probabilities:
+```{r}
+cm <- diag(3)[unclass(factor(nes96$sPID)),]
+y <- as.numeric( t(cm) )
+resp.factor <- gl( 944,3 )
+cat.factor <- gl( 3,1,3*944, labels = c("D","I","R"))
+rnincome <- rep( nincome, each = 3 )
+head( data.frame( y, resp.factor, cat.factor, rnincome))
+```
+
+```{r}
+glmod <- glm( y ~ resp.factor + cat.factor + cat.factor:rnincome, family=poisson)
+```
+
+compare deviances for 2 approaches:
+```{r}
+deviance( glmod )
+deviance( mmodi )
+```
+
+compare coefficients:
+```{r}
+coef( glmod )[c(1,945:949)]
+coef( mmodi )
+```
+
+Therefore, the multinomial logit model can be viewed as a GLM-type model, which allows us to apply all the common methodology developed for GLMs
+
+
+### Hierarchical or Nested Responses
+
+```{r}
+data( cns )
+glimpse( cns)
+```
+The majority of cases had no defect (NoCNS), so here it makes sense to treat this as a hierarchical model with first a binomial likelihood, followed by a multinomial that spits up the types od defects:
+
+```{r}
+cns$CNS <- cns$An + cns$Sp + cns$Other
+plot( log( CNS/NoCNS) ~ Water, cns, pch=as.character(Work))
+```
+higher for manual workers
+
+```{r}
+binmodw <- glm( cbind( CNS, NoCNS ) ~ Water + Work, data = cns, family = binomial )
+binmoda <- glm( cbind( CNS, NoCNS ) ~ Area + Work, data = cns, family = binomial )
+anova( binmodw, binmoda, test = "Chi")
+```
+```{r}
+halfnorm( residuals(binmodw))
+```
+
+```{r}
+summary( binmodw )
+```
+```{r}
+round((1-exp( -0.339058 ))*100,2)
+```
+births to nonmanual workers have a 29% lower chance of CNS malformation.
+both the Water quality and Workstyle of the parents are related to the odds of cns malformations.
+
+Now to look at the multinomial relationship (types of cns malformations)
+
+```{r}
+cmmod <- multinom( cbind( An, Sp, Other) ~ Water + Work, data = cns )
+nmod <- step( cmmod )
+```
+
+step AIC leaves us with the null model.  
+the fitted proportions:
+```{r}
+nmod
+```
+```{r}
+cc <- c( 0,0.28963, -0.98083 )
+names( cc ) <- c( 'An', 'Sp', 'Other' )
+exp( cc )/sum( exp( cc ) )
+```
+therefore, we find that water hardness and parents' professions are related to the probability of a malformed birth, but has no effect on the type of malformation. This finding would have been missed had we used a simple multinomial logit model to all 4 categories.
+
+### Ordinal Multinomial Responses  
+With ordinal responses it is often easiest to work with cumulative probabilities
+
+#### Proportional Odds Model (logit link)
+```{r}
+pomod <- polr( factor(sPID) ~ age + educ + nincome, data = nes96 )
+```
+
+```{r}
+c( deviance( pomod ), pomod$edf )
+c( deviance( mmod ), mmod$edf )
+```
+```{r}
+pomodi <- step( pomod )
+```
+
+```{r}
+deviance( pomodi ) - deviance( pomod )
+pchisq( 11.151, pomod$edf-pomodi$edf, lower = F)
+```
+```{r}
+summary( pomodi )
+```
+```{r}
+#for an income of $0 the probability of being a democrat:
+ilogit( 0.209 )
+```
+```{r}
+#while that of being an Independent:
+ilogit( 1.292 ) - ilogit( 0.209 )
+```
+so the probability of being a republican == 1 - ( 0.55 + 0.23 ) 
+
+```{r}
+predict( pomodi, data.frame( nincome = il, row.names = il ), type = "probs")
+```
+
+Notice how the probability of being a democrat decreases with income while the probability of being a republican increases with income.
+
+#### Oredered Probit Model
+```{r}
+opmod <- polr( factor(sPID) ~ nincome, method = "probit", data = nes96 )
+summary( opmod )
+```
+```{r}
+dems <- pnorm( 0.128-il*0.008182 )
+demind <- pnorm( 0.798-il*0.008182 )
+cbind( dems, demind-dems, 1-demind )
+```
+The predicted values are very similar
 
 
 <br><br><br>
