@@ -685,4 +685,125 @@ cbind( dems, demind-dems, 1-demind )
 The predicted values are very similar
 
 
+## Generalized Linear Models
+**GLM Definition** the response should be a member of the exponential family distribution ( Normal/Gaussian, Poisson, Binomial ) and the link function describes how the mean of the response and a linear combination of the predictors are related. The link function expresses the effect of the predictors on the response through a linear predictor. In principle, any monotone continuous and differentiable function will do, but there are some convenient and common choices for the standard GLMs. Typically use numeric optimization to find the maximum likelihood...some kinda iterative procedure to *hopefully* converge on a solution
+
+
+|        Canonical links for GLMs                             |
+| Family           | Link Fxn                | Variance Fxn   |
+|------------------|-------------------------|----------------|
+| Normal           | $\eta=\mu$              | 1              |
+| Poisson          | $\eta=log\mu$           | $\eta$         |
+| Binomial         | $\eta=log(\mu/(1-\mu))$ | $\eta(1-\eta)$ |
+| Gamma            | $\eta=\mu^{-1}$         | $\eta^2$       |
+| Inverse Gaussian | $\eta-\mu^{-2}$         | $\eta^3$       |
+
+an example using the `bliss` dataset:
+```{r}
+data( bliss )
+mod_bliss <- glm( cbind( dead, alive ) ~conc,
+                  family = binomial,
+                  data = bliss )
+summary( mod_bliss )
+```
+
+An example of several iterations of an IRWLS procedure:
+```{r}
+y <- bliss$dead/30; mu <- y
+eta <- logit( mu )
+z <- eta + (y-mu)/(mu*(1-mu))
+w <- 30*mu*(1-mu)
+lmod <- lm( z ~ conc, weights = w, data = bliss )
+coef( lmod )
+
+for( i in 1:5 ){
+  eta <- lmod$fit
+  mu <- ilogit( eta )
+  z <- eta + (y-mu)/(mu*(1-mu))
+  w <- 30*mu*(1-mu)
+  lmod <- lm( z ~ bliss$conc, weights = w )
+  cat( i, coef( lmod ), '\n' )
+}
+```
+The convergence is fast for this example!
+
+### Hypothesis tests
+The *null* model is the smallest model we will entertain while the *full* or *saturated* model is the most complex. The null model represents the situation where there is no relation between predictors and the response while the saturated model explains the data exactly. The saturated model tells us no more than the data itself and is generally uninformative.  
+
+* Goodness of fit - whether the current model fits the data
+* Nested fit - compare two nested models where the smaller model represents a linear restriction on the parameters of a larger model. Use the difference of scaled deviances to compare models.
+
+make a goodness of fit test on our earlier model by examining the size of the residual deviance compared to the degrees of freedom:
+```{r}
+1 - pchisq( deviance( mod_bliss ), df.residual( mod_bliss ) )
+```
+the p-value is large indicating no evidence of a lack of fit.
+
+```{r}
+anova( mod_bliss, test = 'Chi' )
+```
+we see that the `conc` parameter is very significant
+
+### GLM Diagnostics
+Checking the adequacy of the assumptions that support the GLM 
+
+#### Residuals
+**Pearson residual** - is comparable to the standardized residuals used for linear models  
+**deviance residuals** - sum of the deviance  
+```{r}
+#deviance residuals
+residuals( mod_bliss )
+#pearson residuals
+residuals( mod_bliss, 'pearson' )
+#response residuals
+residuals( mod_bliss, 'response' )
+#working residuals
+residuals( mod_bliss, 'working' )
+```
+
+#### Leverage and Influence
+Large leverages typically mean that the predictor values are unusual in some way. Leverages only measure the potential to affect the fit whereas measures of influence more directly assess the effect of each case on the fit. Outliers may be detected by observing particularly large jacknife residuals
+```{r}
+influence( mod_bliss )$hat
+```
+
+#### model diagnostic visualizations
+For GLMs, we must decide on the appropriate scale for the fitted vales....usually it is better to plot the linear predictors rather than the predicted responses. Deviance residuals plotted as a function of the linear predictors: is there any nonlinear relationship between the predicted values and the residuals? Variance of the residuals with respect to the fitted values should also be inspected: is there constant variance?
+
+```{r}
+data( gala )
+gala <- gala[,-2]
+mod_gala <- glm( Species ~ ., family = poisson, data = gala )
+plot( residuals( mod_gala ) ~ predict( mod_gala, type = 'link' ),
+      xlab = expression( hat( eta ) ), ylab = 'Deviance residuals' )
+```
+linearized response
+```{r}
+mu <- predict( mod_gala, type = 'response' )
+z <- predict( mod_gala ) + (gala$Species - mu)/mu
+plot( z ~ log( Area ), data = gala, ylab = 'Linearized Response' )
+```
+
+#### Unusual Points
+for GLM, we do not expect the residuals to be normally distributed, but we are still interrested in detecting outliers
+```{r}
+halfnorm( rstudent(mod_gala) ) 
+gali <- influence( mod_gala )
+halfnorm( gali$hat )
+```
+
+## Other GLMs
+**Gamma** and **Inverse** GLMs are useful for continuous, skewed responses  
+**Dual GLMs** are good for modeling the mean and dispersion of the response  
+**quasi-GLMs** are useful for non-standard responses where you are unwilling to specify the distribution but can state the link and variance functions.
+
+
+
+
+
+
+
+
+
+
 <br><br><br>
