@@ -25,6 +25,8 @@ library( MASS )
 library( brglm2 )
 library( survival )
 library( nnet )
+library( lattice )
+library( lme4 )
 ```
 
 
@@ -797,8 +799,93 @@ halfnorm( gali$hat )
 **Dual GLMs** are good for modeling the mean and dispersion of the response  
 **quasi-GLMs** are useful for non-standard responses where you are unwilling to specify the distribution but can state the link and variance functions.
 
+## Repeated Measures and Longitudinal Data
+
+* **repeated measures** - measurements are taken repeatedly on individuals.  
+* **longitudinal data** - repeated measures are taken over time  
+  - fixed effect - a function of the covariates
+  - random effect - expresses the variation between individuals
+  - error - error in measurement of from unrecorded variables
+  
+
+### Longitudinal Data
+  
+```{r}
+data( psid )
+glimpse( psid )
+```
+
+```{r}
+xyplot( income ~ year | person, data = psid, type = "l", subset = (person<21), strip = F )
+```
+```{r}
+xyplot( log( income+100 ) ~ year | sex, data = psid, type = "l", strip = F )
+```
+men's income is generally higher and less variable than women's income.
+
+```{r}
+lmod <- lm( log(income) ~ I(year-78), subset = (person == 1), data = psid )
+coef( lmod )
+```
+
+```{r}
+slopes <- numeric(85);
+intercepts <- numeric(85)
+for( i in 1:85){
+  lmod <- lm( log( income ) ~ I( year - 78 ),
+              subset = ( person==i ), data = psid )
+  intercepts[i] <- coef( lmod )[1]
+  slopes[i] <- coef( lmod )[2]
+}
+plot( intercepts, slopes, xlab = "Intercept", ylab = "Slope" )
+psex <- psid$sex[ match( 1:85, psid$person ) ]
+boxplot( split( slopes,psex ) )
+```
+
+```{r}
+t.test( slopes[psex=='M'],slopes[psex=='F'])
+```
+Women have a significantly higher growth rate than men
+
+```{r}
+t.test( intercepts[psex=='M'],intercepts[psex=='F'])
+```
+
+Men have significantly higher incomes
+
+```{r}
+psid$cyear <- psid$year - 78
+mmod <- lmer( log( income ) ~ cyear*sex+age+educ+(cyear|person), data = psid )
+summary( mmod )
+```
+income increases ~ 10% for each additional year of education  
+age does not appear to be significant 
+
+```{r}
+qqmath( ~resid( mmod ) | sex, psid )
+```
 
 
+```{r}
+xyplot( resid( mmod ) ~ fitted( mmod ) | cut( educ,c(0,8.5,12.5,20)), 
+        data = psid, layout = c(3,1), xlab = "Fitted", ylab = "Residuals")
+```
+
+### Repeated Measures  
+
+```{r}
+data( vision )
+glimpse( vision )
+```
+```{r}
+xyplot( acuity ~ power | subject, data = vision, type = 'l', groups = eye,
+        lty = 1:2, layout = c( 4,2) )
+```
+
+```{r}
+vismod <- lmer( acuity ~ power + (1|subject) + (1|subject:eye), vision )
+summary( vismod )
+```
 
 
 
