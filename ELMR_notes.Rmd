@@ -27,6 +27,8 @@ library( survival )
 library( nnet )
 library( lattice )
 library( lme4 )
+library( sm )
+library( splines )
 ```
 
 
@@ -888,7 +890,112 @@ summary( vismod )
 ```
 
 
+```{r}
+anova( vismod )
+```
+```{r}
+vismodr <- lmer( acuity ~ power + (1|subject) + (1|subject:eye), vision , subset = -43)
+anova( vismodr )
+```
 
+```{r}
+op <- options( contrasts = c("contr.helmert","contr.poly") )
+vismodr <- lmer( acuity ~ power + (1|subject) + (1|subject:eye), vision , subset = -43)
+summary( vismodr )
+options( op )
+```
+
+## Nonparametric Regression 
+**nonparametric approach** - choose f from some smooth family of functions and assume the f has some degree of smoothness and continuity. there are many advantages to parametric methods (easy to summarize//represent symbolically), but nonparametric methods are advantageous because they protect against model specification error
+
+```{r}
+par(mfrow=c(1,3))
+
+data( exa )
+plot( y ~ x, exa, main = "Example A", pch= ".")
+lines( m ~ x, exa )
+
+data( exb )
+plot( y ~ x, exb, main = "Example B", pch= ".")
+lines( m ~ x, exb )
+
+data( faithful )
+plot( waiting ~ eruptions, faithful, main = "Old Faithful", pch= ".")
+```
+
+### Kernel Estimators
+simplest form == moving averages. e.g. a rectangular window with a window/bandwidth ($\lambda$) which controls the smoothness of the fitted curve. The optimal choice of kernel achieves smoothness (no disjointed edges) and compactness (does not overweigh outliers). The choice of smoothing parameter is much more critical: if the smoothing paramter is too small, the estimator will be too rough; but if it is too large, important features will be lost. 
+
+```{r}
+par(mfrow=c(1,3))
+
+plot( waiting ~ eruptions, faithful, main = "bandwidth = 0.1", pch= ".")
+lines( ksmooth( faithful$eruptions, faithful$waiting, "normal",0.1))
+
+plot( waiting ~ eruptions, faithful, main = "bandwidth = 0.5", pch= ".")
+lines( ksmooth( faithful$eruptions, faithful$waiting, "normal",0.5))
+
+plot( waiting ~ eruptions, faithful, main = "bandwidth = 2", pch= ".")
+lines( ksmooth( faithful$eruptions, faithful$waiting, "normal",2))
+```
+
+Can automatically select $\lambda$ with *generalized cross-validation* methods:
+```{r}
+par(mfrow=c(1,2))
+# use the sm library
+hm <- hcv( faithful$eruptions, faithful$waiting, display= 'lines')
+sm.regression( faithful$eruptions, faithful$waiting, h=hm,xlab="duration",ylab="waiting")
+```
+
+### Splines
+criterion balances fit against smoothness with a roughness penalty
+
+```{r}
+par(mfrow=c(1,3))
+
+plot( waiting ~ eruptions, faithful, main= "Faithful", pch= ".")
+lines( smooth.spline( faithful$eruptions, faithful$waiting))
+
+plot( y ~ x, exa, main = "Example A", pch= ".")
+lines( m ~ x, exa )
+lines( smooth.spline( exa$m ~ exa$x), lty=2 )
+
+plot( y ~ x, exb, main = "Example B", pch= ".")
+lines( m ~ x, exb )
+lines( smooth.spline( exb$m ~ exb$x), lty=2 )
+```
+#### regression splines
+```{r}
+par(mfrow=c(1,2))
+rhs <- function(x,c) ifelse (x>c, x-c, 0)
+curve( rhs( x,0.5), 0, 1 )
+knots <- 0:9/10
+dm <- outer( exa$x, knots, rhs )
+matplot( exa$x, dm, type="l",col=1)
+```
+```{r}
+par(mfrow=c(1,2))
+
+g <- lm( exa$y ~ dm )
+plot( y~x, exa, pch=".",xlab="x",ylab="y",main="Evenly spaced knots")
+lines( exa$x, predict(g) )
+newknots <- c( 0, 0.5, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95 )
+dmn <- outer( exa$x, newknots, rhs )
+gn <- lm( exa$y ~ dmn )
+plot( y~x, exa, pch=".",xlab="x",ylab="y",main="Knots at curvature")
+lines( exa$x, predict( gn ) )
+```
+
+```{r}
+par(mfrow=c(1,2))
+matplot( bs( seq( 0,1,length=1000),df=12), type="l", ylab="",col=1)
+sml <- lm( y ~bs( x,12 ), exa )
+plot( y~x, exa, pch="." )
+lines( m ~ x, exa )
+line( exa$x, predict( sml ) )
+```
+
+### Local Polynomials
 
 
 
