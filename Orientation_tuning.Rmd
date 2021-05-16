@@ -1,0 +1,69 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=F}
+library( R.matlab )
+library( dplyr )
+library( data.table )
+library( smoother )
+library( ggplot2 )
+library( gridExtra )
+```
+
+single units x conditions x time bins x repetitions
+```{r}
+sortedSpikes <- readMat( "/home/bonzilla/Documents/MSDS/DATA621/data_v1_binned_moving.mat") 
+sSlength <- length( sortedSpikes$data )
+sSlength
+```
+this set contains neural data from 27 seperate recordings. each recording holds the binned spike data for a number of isolated neurons, or single units. For example, we can see the number of single units recorded for the first experiment session:
+```{r}
+r1dim <- dim( sortedSpikes$data[[1]][[1]][[6]] )
+r1dim_dt <- data.table( 'single_units' = r1dim[1], 'conditions' = r1dim[2], 
+                        'time_bins' = r1dim[3], 'repetitions' = r1dim[4] )
+r1dim_dt
+```
+From the output above and referencing the data documentation, we see that the first recording session has data for 38 single units recorded over 16 different conditons. The data is binned into 90 bins. there were 13 trials for this experiment.
+
+find the recording session with the most number of single units recorded and trials (repititions):
+```{r}
+num_units <- c()
+num_trials <- c()
+for ( sunit in 1:sSlength ) {
+  rdim <- dim( sortedSpikes$data[[1]][[1]][[6]] )
+  num_units[ sunit ] <- rdim[1]
+  num_trials[ sunit ] <- rdim[4]
+}
+
+exp_info_df <- data.frame( 'num_units' = num_units, 'num_trials' = num_trials )
+distinct( exp_info_df )
+```
+Data was collected for the same number of units and trials for each recording session.  
+
+Here we visualize the results from the first experimental session:
+```{r}
+a <- sortedSpikes$data[[1]][[1]]
+dim( sortedSpikes$data[[1]][[1]][[6]] )
+#a[[1]] time and date
+#a[[2]] subject
+#a[[3]] contrast and orientation
+#a[[4]] contamination (cross-correlation? of the single units)
+#a[[5]] tetrode
+a[[6]][3,1:16,1:90,1]
+a2 <- rowSums( a[[6]], dims = 3 )
+dim(a2)
+a2[6,1, 1:90]
+
+```
+
+```{r}
+barplot( a2[1,16, 1:90] )
+lines( ksmooth( x = 1:90, y = a2[1,16, 1:90], kernel = "normal", bandwidth = 5) )
+```
+
