@@ -1,16 +1,29 @@
 ---
-title: "Distinguishing Retinal Ganglion Cell Classes with Linear Regression in `R`"
-author: "Bonnie Cooper, PhD"
+title: "Orientation Tuning in V1 Neurons"
+subtitle: "a Loess Smoothing Application"
+author: "Bonnie Cooper"
 output:
   prettydoc::html_pretty:
     theme: leonids
 ---
 
+<img src="orientations.png" width="100%" height="100%" />
+<div style="text-align: right"> *mapping of orientation tuning across the surface of V1*  
+*- Bosking et al 1997*</div>  
+
+<br>
+
+The visual system is organized into a hierarchy of different interconnected areas of the brain. As signals propagate across the hierarchy of the visual system, the information represented in the signal becomes more complex. For example, the output cells of the primate retina, retinal ganglion cells, primarily transmit luminance contrast and chromatic contrast to the cortex. However, the response properties of neurons in V1 (the first visual cortical area) build upon this to represent the orientation of contrast edges.  
+
+The following code will visualize some responses from V1 cortical neurons from a data set made publicly available by the [Bethge Lab](http://bethgelab.org/datasets/v1gratings/). The neurons were recorded during a experiments where drifting sinusoid gratings were presented at different orientation angles. The following code will visualize the responses to all grating orientations for a subset of the neurons. To facilitate comparison between conditions, the response for each orientation will be smoothed using loess (locally weighted regression) smoothing. The image below shows a few examples of sinusoidal contrast gratings of different orientations similar to the stimuli used in this experiment.
+
+![](gratings.png)
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-```{r message=F}
+```{r message=F, echo = F}
 library( R.matlab )
 library( dplyr )
 library( data.table )
@@ -20,22 +33,25 @@ library( tidyverse )
 library( gridExtra )
 ```
 
-single units x conditions x time bins x repetitions
-```{r}
+Let's begin by getting a feel for the data set. The data set holds recordings from electrode arrays in V1 and has different experimental sessions organized in different structures:
+```{r echo=F}
 sortedSpikes <- readMat( "/home/bonzilla/Documents/MSDS/DATA621/data_v1_binned_moving.mat") 
+```
+
+```{r}
 sSlength <- length( sortedSpikes$data )
 sSlength
 ```
-this set contains neural data from 27 separate recordings. each recording holds the binned spike data for a number of isolated neurons, or single units. For example, we can see the number of single units recorded for the first experiment session:
+This set contains neural data from 27 separate experimental recordings. Each recording holds the binned spike data for a number of isolated neurons, or single units. For example, we can see the number of single units recorded for the first experiment session:
 ```{r}
 r1dim <- dim( sortedSpikes$data[[1]][[1]][[6]] )
 r1dim_dt <- data.table( 'single_units' = r1dim[1], 'conditions' = r1dim[2], 
                         'time_bins' = r1dim[3], 'repetitions' = r1dim[4] )
 r1dim_dt
 ```
-From the output above and referencing the data documentation, we see that the first recording session has data for 38 single units recorded over 16 different conditions. The data is binned into 90 bins. there were 13 trials for this experiment.
+From the output above and referencing the data documentation, we see that the first recording session has data for 38 single units recorded over 16 different conditions. The data is binned into 90 time bins (each 10ms in duration). There were 13 trials for this experiment.
 
-let's find the recording session with the most number of single units recorded and trials (repetitions):
+Let's find the recording session with the most number of single units recorded and the most trials (repetitions):
 ```{r}
 num_units <- c()
 num_trials <- c()
@@ -124,15 +140,15 @@ neuron1 <- makeNeuronResponseDF( sortedSpikes, 1, 1 )
 plotOrientationTuning( neuron1 )
 ```
 
-The figure above shows the smoothed binned response histograms for this particular neuron to drifting sinusoid gratings presented at 16 different orientations. The vertical solid black line at `time` = 0 makes when the stimulus was turned on. There is an approximately 50ms time period after stimulus onset while the response of the cell ramps up. There is fluctuation (likely owing to the periodicity of the sinusoid), but overall the response is sustained for the rest of the 500ms that the grating was presented. It is very obvious from the figure that the response is not equal for all orientations of the grating. Rather, there are some orientations where the stimulus is not much greater than baseline (i.e. 315 & 337.5 deg). On the other hand, there are other orientations that give a very strong response. For this cell 0 & 180 deg (same orientation but different direction of motion) give very strong responses. However, there are other orientations that the cells responds somewhat strongly to, therefore, we would say that this neuron has a relatively broad orientation tuning.
+The figure above shows the smoothed binned response histograms for this particular neuron to drifting sinusoid gratings presented at 16 different orientations. The vertical solid black line at `time` = 0 marks the moment the stimulus was turned on. There is an approximately 50ms time period after stimulus onset while the response of the cell ramps up. There are fluctuations (likely owing to the periodicity of the sinusoid), but overall the response is sustained for the rest of the 500ms that the grating was presented. It is very obvious from the figure that the response is not equal for all orientations of the grating. Rather, there are some orientations where the stimulus is not much greater than baseline (i.e. 315 & 337.5 deg). On the other hand, there are other orientations that give a very strong response. For this cell 0 & 180 deg (same orientation but different direction of motion) give very strong responses. However, there are other orientations that the cells responds somewhat strongly to, therefore, we would say that this neuron has a relatively broad orientation tuning.
 
-Let's now use the functions we wrote to observe the prefered orientations of a few other neurons from the data set:
+Let's now use the functions we wrote to observe the preferred orientations of a few other neurons from the data set:
 ```{r warning=F, message=F}
 neuron2 <- makeNeuronResponseDF( sortedSpikes, 20, 15 )
 plotOrientationTuning( neuron2 )
 ```
 
-Looking at the smoothed responses for this neuron, we see that there are two orientations, 67 & 247 deg, with very strong responses while the remaining orientations were much lower. 67 & 247 deg are 180 deg and therefore the same orientation but drifting in opposite directions. Because this cell really only responds to orientation we would say that it has a narrow tuning compared to the first neuron.
+Looking at the smoothed responses for this neuron, we see that there are two orientations, 67 & 247 deg, with very strong responses while the remaining orientations were much lower. 67 & 247 deg are 180 deg and therefore the same orientation but drifting in opposite directions. Because this cell really only responds to one orientation we would say that it has a narrow orientation tuning compared to the first neuron.
 
 
 Now, let's visualize several cells together to get a feel for the variety of responses:
@@ -157,6 +173,7 @@ grid.arrange( arrangeGrob( p1  + theme(legend.position="none"),
                            p5  + theme(legend.position="none"), 
                            p6  + theme(legend.position="none"), nrow = 2 ) )
 ```
+
 
 
 <br><br><br>
