@@ -1,6 +1,9 @@
 ---
-title: "Untitled"
-output: html_document
+title: "Distinguishing Retinal Ganglion Cell Classes with Linear Regression in `R`"
+author: "Bonnie Cooper, PhD"
+output:
+  prettydoc::html_pretty:
+    theme: leonids
 ---
 
 ```{r setup, include=FALSE}
@@ -11,8 +14,9 @@ knitr::opts_chunk$set(echo = TRUE)
 library( R.matlab )
 library( dplyr )
 library( data.table )
-library( smoother )
+library( smooth )
 library( ggplot2 )
+library( tidyverse )
 library( gridExtra )
 ```
 
@@ -22,16 +26,16 @@ sortedSpikes <- readMat( "/home/bonzilla/Documents/MSDS/DATA621/data_v1_binned_m
 sSlength <- length( sortedSpikes$data )
 sSlength
 ```
-this set contains neural data from 27 seperate recordings. each recording holds the binned spike data for a number of isolated neurons, or single units. For example, we can see the number of single units recorded for the first experiment session:
+this set contains neural data from 27 separate recordings. each recording holds the binned spike data for a number of isolated neurons, or single units. For example, we can see the number of single units recorded for the first experiment session:
 ```{r}
 r1dim <- dim( sortedSpikes$data[[1]][[1]][[6]] )
 r1dim_dt <- data.table( 'single_units' = r1dim[1], 'conditions' = r1dim[2], 
                         'time_bins' = r1dim[3], 'repetitions' = r1dim[4] )
 r1dim_dt
 ```
-From the output above and referencing the data documentation, we see that the first recording session has data for 38 single units recorded over 16 different conditons. The data is binned into 90 bins. there were 13 trials for this experiment.
+From the output above and referencing the data documentation, we see that the first recording session has data for 38 single units recorded over 16 different conditions. The data is binned into 90 bins. there were 13 trials for this experiment.
 
-find the recording session with the most number of single units recorded and trials (repititions):
+let's find the recording session with the most number of single units recorded and trials (repetitions):
 ```{r}
 num_units <- c()
 num_trials <- c()
@@ -44,26 +48,116 @@ for ( sunit in 1:sSlength ) {
 exp_info_df <- data.frame( 'num_units' = num_units, 'num_trials' = num_trials )
 distinct( exp_info_df )
 ```
-Data was collected for the same number of units and trials for each recording session.  
 
-Here we visualize the results from the first experimental session:
+Data was collected for the same number of units and trials for each recording session. Hmmmmm, that's unusual in the wild...this data must have been cleaned up beforehand.  
+
+From the documentation that accompanied the dataset, we know fields contain the following information:  
+
+1. **date** - date and time stamp when the session was recorded
+2. **subject** - identifies the monkey used in the session
+3. **conditions** - specifies the orientation and contrast used
+4. **contamination** - contamination of the single units, for details see paper; for both studies only units with a contamination value < 0.05 were used
+5. **tetrode** - specifies the tetrode a single unit was recorded on; for tetrode grid layout, see supplementary material of Ecker et al. (2010)
+6. **spikes** - contains binned spikes single units x conditions x time bins x repetitions
+7. **times** - times aligned to bin centers
+
+Let's explore the data further to learn about a few of these fields for a given recording session. Starting with the **conditions**. The following are the different stimuli conditions data was collected for (13 trials each condition):
 ```{r}
-a <- sortedSpikes$data[[1]][[1]]
-dim( sortedSpikes$data[[1]][[1]][[6]] )
-#a[[1]] time and date
-#a[[2]] subject
-#a[[3]] contrast and orientation
-#a[[4]] contamination (cross-correlation? of the single units)
-#a[[5]] tetrode
-a[[6]][3,1:16,1:90,1]
-a2 <- rowSums( a[[6]], dims = 3 )
-dim(a2)
-a2[6,1, 1:90]
+session1 <- sortedSpikes$data[[1]][[1]]
+session1[[3]]
+```
+Data was collected for 16 different grating orientations. The goal of the following data visualization is to demonstrate that V1 cortical neurons have preferred orientation tunings. To illustrate this, we will be fitting smoothed non-parametric functions (method = loess) to the spike histograms constructed from the responses to each orientation condition. Only one contrast setting was used for this experiment, so we will exclude this feature from further analysis.
 
+
+The following function will format the binned spike data for one of the (38) neurons recorded during this experimental session:
+```{r}
+makeNeuronResponseDF <- function( array, session, neuron ){
+  session_dat <- array$data[[session]][[1]]
+  # feature columns with stimulus contrast and orientation information
+  stimmat <- matrix( unlist( session_dat[[3]] ), nrow = 2, byrow = F )
+  conditions_df <- data.frame( 'contrasts' = stimmat[1,], 'orientation' = stimmat[2,] )
+  columns <- c()
+  for(col in 1:dim(stimmat)[2]){
+    columns[ col ] <- toString( paste0( 'Con_', stimmat[ 1,col ], '_Deg_', stimmat[ 2,col ] ) )
+   }
+  binnedSpikes_df <- data.frame( matrix(ncol = length( columns ), nrow = 90))
+  colnames( binnedSpikes_df ) <- columns
+  # sum the binned spike data along the 3rd dimension. 
+  # this will combine information from all trials for each condition
+  binnedSpikes <- rowSums( session_dat[[6]], dims = 3 )
+  numTrials <- dim(session_dat[[6]])[4]
+  # take the average response by diving by number of trials
+  for(col in 1:dim(stimmat)[2]){
+    binnedSpikes_df[ columns[ col ] ] <- binnedSpikes[neuron, col , 1:dim(session_dat[[6]])[3] ]
+  }
+  binnedSpikes_df$timebins <- session_dat[[7]][1:dim(session_dat[[6]])[3]]
+  return( list( conditions_df, binnedSpikes_df ) )
+}
 ```
 
+The following function will visualize the responses formatted by `makeNeuronResponseDF`:
 ```{r}
-barplot( a2[1,16, 1:90] )
-lines( ksmooth( x = 1:90, y = a2[1,16, 1:90], kernel = "normal", bandwidth = 5) )
+plotOrientationTuning <- function( neuronResponse_List ){
+  conditions <-  neuronResponse_List[[1]]
+  responses <- neuronResponse_List[[2]]
+  names <- colnames( responses )
+  #make data long to plot by factor (condition)
+  long_dat <- responses %>%
+    pivot_longer( cols = !timebins, names_to = 'condition', values_to = 'responses' )
+  #specify the order of the factor
+  long_dat$condition <- factor( long_dat$condition, levels = names )
+  #custom color scale
+  colfunc <- colorRampPalette(c("red", "yellow", "green", "blue"))
+  plot <- ggplot( data = long_dat ) +
+    geom_vline( xintercept = 0, color = 'black' ) +
+    stat_smooth( aes( y= responses, x = timebins, col = condition ), se = F, span = 0.50, method = 'loess' ) +
+    scale_color_manual( name = 'condition', values = colfunc( 16 )) + 
+    theme_classic() +
+    ggtitle('Smoothed Response Histogram')
+  return( plot )
+}
 ```
+
+Let's use these functions to visualize the responses of the first neuron from the first recording session:
+```{r warning=F, message=F}
+neuron1 <- makeNeuronResponseDF( sortedSpikes, 1, 1 )
+plotOrientationTuning( neuron1 )
+```
+
+The figure above shows the smoothed binned response histograms for this particular neuron to drifting sinusoid gratings presented at 16 different orientations. The vertical solid black line at `time` = 0 makes when the stimulus was turned on. There is an approximately 50ms time period after stimulus onset while the response of the cell ramps up. There is fluctuation (likely owing to the periodicity of the sinusoid), but overall the response is sustained for the rest of the 500ms that the grating was presented. It is very obvious from the figure that the response is not equal for all orientations of the grating. Rather, there are some orientations where the stimulus is not much greater than baseline (i.e. 315 & 337.5 deg). On the other hand, there are other orientations that give a very strong response. For this cell 0 & 180 deg (same orientation but different direction of motion) give very strong responses. However, there are other orientations that the cells responds somewhat strongly to, therefore, we would say that this neuron has a relatively broad orientation tuning.
+
+Let's now use the functions we wrote to observe the prefered orientations of a few other neurons from the data set:
+```{r warning=F, message=F}
+neuron2 <- makeNeuronResponseDF( sortedSpikes, 20, 15 )
+plotOrientationTuning( neuron2 )
+```
+
+Looking at the smoothed responses for this neuron, we see that there are two orientations, 67 & 247 deg, with very strong responses while the remaining orientations were much lower. 67 & 247 deg are 180 deg and therefore the same orientation but drifting in opposite directions. Because this cell really only responds to orientation we would say that it has a narrow tuning compared to the first neuron.
+
+
+Now, let's visualize several cells together to get a feel for the variety of responses:
+```{r warning = F, message=F}
+neuron3 <- makeNeuronResponseDF( sortedSpikes, 27, 2 )
+p1 <- plotOrientationTuning( neuron3 )
+neuron3 <- makeNeuronResponseDF( sortedSpikes, 27, 3 )
+p2 <- plotOrientationTuning( neuron3 )
+neuron3 <- makeNeuronResponseDF( sortedSpikes, 27, 4 )
+p3 <- plotOrientationTuning( neuron3 )
+neuron3 <- makeNeuronResponseDF( sortedSpikes, 27, 5 )
+p4 <- plotOrientationTuning( neuron3 )
+neuron3 <- makeNeuronResponseDF( sortedSpikes, 27, 6 )
+p5 <- plotOrientationTuning( neuron3 )
+neuron3 <- makeNeuronResponseDF( sortedSpikes, 27, 7 )
+p6 <- plotOrientationTuning( neuron3 )
+
+grid.arrange( arrangeGrob( p1  + theme(legend.position="none"), 
+                           p2  + theme(legend.position="none"), 
+                           p3  + theme(legend.position="none"), 
+                           p4  + theme(legend.position="none"), 
+                           p5  + theme(legend.position="none"), 
+                           p6  + theme(legend.position="none"), nrow = 2 ) )
+```
+
+
+<br><br><br>
 
