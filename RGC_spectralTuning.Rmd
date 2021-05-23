@@ -1,0 +1,36 @@
+---
+title: "RGC_spectune"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=F, echo=F}
+library( dplyr )
+library( ggplot2 )
+library( tidyverse )
+library( gridExtra )
+```
+
+
+
+```{r}
+url <- 'https://raw.githubusercontent.com/SmilodonCub/DATA621/master/deValoisDeValois_dat.csv'
+spectral_tuning <- read.csv( url )
+glimpse( spectral_tuning )
+```
+
+```{r}
+rad_lab <- split( spectral_tuning,f = spectral_tuning$cell_type )
+p1 <- ggplot( data = rad_lab$GR_cell, aes( x = wavelength, y = firing_rate, col = factor( radiance ) ) ) +
+  geom_point( size = 3) +
+  facet_wrap( ~ cell_type ) +
+  theme_classic() +
+  ylab( "mean firing rate (spikes/sec)") +
+  labs(color='Radiance') 
+p2 <- p1 %+% rad_lab$YB_cell
+grid.arrange( p1, p2, ncol = 2 )
+```
+
