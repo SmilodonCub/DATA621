@@ -1,7 +1,16 @@
 ---
-title: "RGC_spectune"
-output: html_document
+title: "Spectral Tuning of Lateral Geniculate Nucleus Neural Responses"
+subtitle: "loess smoothing to find peak spectral sensitivity"
+author: "Bonnie Cooper"
+output:
+  prettydoc::html_pretty:
+    theme: tactile
 ---
+
+<img src="BBL_RGClayer.png" width="100%" height="100%" />
+<div style="text-align: right"> *Outer Plexiform Layer of the retina: where the ganglion cells call home*  
+*- Kaplan, Lee, Shapley (1990) *</div>
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -10,27 +19,113 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r message=F, echo=F}
 library( dplyr )
 library( ggplot2 )
-library( tidyverse )
+library( tidyr )
+library( purrr )
 library( gridExtra )
+library( knitr )
 ```
 
+## Spectral Tuning
+
+&nbsp;&nbsp;&nbsp;&nbsp;In a previous post, we looked at the differences between retinal ganglion cells (RGCs). We explored some data from a paper by Cronin & Kaplan (1994) that demonstrated the differences in receptive field (RF) size between the cell classes. Here, we will look at data from another study by De Valois, Abramov & Jacobs (1965) that studies neurons in the stage of visual signal processing after the retina, the later geniculate nucleus (LGN). The majority of RGCs connect with LGN neurons which, in turn, send visual information on to the cortex. De Valois *et al* were interested in characterizing LGN cells by their spectral sensitivity. Spectral sensitivity is a response property where a neuron gives it's most vigorous response to specific wavelengths of light. De Valois *et al* used a very simple rubric to classify cells: 1) does the cell's response change with the stimuli's wavelength? If yes, 2) Is the cell's maximum response to long wavelength light or to short wavelength light? See the figure below:
+
+![](deValoisDeValois_RGCcat.png)
 
 
+&nbsp;&nbsp;&nbsp;&nbsp;From this schematic, we see that De Valois *et al* first categorized LGN neurons on whether the cell was a 'Spectrally Opponent Cell'. This means that the cells responses changed to different wavelengths. For an example, let's look at the figure below.
+
+```{r, echo=FALSE, fig.align='center'}
+include_graphics("deValoisDeValois_raster.png")
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;Each row from this figure shows spiking activity (short vertical lines) of a LGN neurons to a different wavelength of light. We can see that the response is not the same for each and every wavelength. Therefore, this particular cell is spectrally opponent. A spectrally non-opponent cell have the same response regardless of stimulus wavelength.
+
+&nbsp;&nbsp;&nbsp;&nbsp;Next, LGN neurons were classified as to whether their response was maximal to short or long wavelengths and this was made with a few distinctions:  
+
+* Long Wavelength Excitations 
+  - **+R-G** - neurons that were excited by <span style="color:red">red</span> wavelengths of light but inhibited by <span style="color:green">green</span>
+  - **+Y-B** - neurons that were excited by <span style="color:yellow">yellow</span> wavelengths of light but inhibited by <span style="color:blue">blue</span>
+* Short Wavelength Excitations 
+  - **+G-R** - neurons that were excited by <span style="color:green">green</span> wavelengths of light but inhibited by <span style="color:red">red</span>
+  - **+B-Y** - neurons that were excited by <span style="color:blue">blue</span> wavelengths of light but inhibited by <span style="color:yellow">yellow</span>  
+
+
+&nbsp;&nbsp;&nbsp;&nbsp;To understand these classification better, we will use the following code to visualize data collected from two LGN neurons: a long wavelength excited **+Y-B** cell and a short wavelength excited **+G-R**.
+
+## De Valois, Abramov & Jacobs (1965) data 
+
+&nbsp;&nbsp;&nbsp;&nbsp;Let's take a `glimpse` of the dataframe:
 ```{r}
 url <- 'https://raw.githubusercontent.com/SmilodonCub/DATA621/master/deValoisDeValois_dat.csv'
-spectral_tuning <- read.csv( url )
+spectral_tuning <- read.csv( url, colClasses=c('numeric', 'numeric', 'numeric', 'factor') )
 glimpse( spectral_tuning )
 ```
 
-```{r}
+&nbsp;&nbsp;&nbsp;&nbsp;This dataframe gives us the mean firing rates for two LGN neurons sampled at 12 different wavelengths at 3 different luminous intensities. Now, let's visualize the data:
+```{r warning=F, message=F}
+levels( spectral_tuning$cell_type ) <- list("+Y-B LGN cell"="YB_cell", "+G-R LGN cell"="GR_cell")
 rad_lab <- split( spectral_tuning,f = spectral_tuning$cell_type )
-p1 <- ggplot( data = rad_lab$GR_cell, aes( x = wavelength, y = firing_rate, col = factor( radiance ) ) ) +
+p1 <- ggplot( data = rad_lab$`+G-R LGN cell`, aes( x = wavelength, y = firing_rate, col = factor( radiance ) ) ) +
   geom_point( size = 3) +
+  geom_smooth( se = F ) +
   facet_wrap( ~ cell_type ) +
   theme_classic() +
   ylab( "mean firing rate (spikes/sec)") +
-  labs(color='Radiance') 
-p2 <- p1 %+% rad_lab$YB_cell
+  labs(color='Radiance')
+p2 <- p1 %+% rad_lab$`+Y-B LGN cell`
+grid.arrange( p1, p2, ncol = 2 )
+```
+<br>
+&nbsp;&nbsp;&nbsp;&nbsp;The figure above shows the responses of the `+G-R LGN cell` (left) and the `+Y-B LGN cell` (right). Data is plotted for 3 different radiances (brightness levels) as a function of the wavelength of light. The overall shapes of the responses are similar for the two cell types. However, we can see that peak responses, or peak spectral tunings, are shifted toward different wavelengths. 
+
+&nbsp;&nbsp;&nbsp;&nbsp;We will now determine the peak spectral tuning for each cell type at each wavelength
+```{r warning=F, message=F}
+#range of wavelengths 400-700
+wavelengths <- data.frame( 'wavelength' = seq( 440, 660 ) )
+#loess smoothing grouped by radiance
+loess_smooth_vals <- spectral_tuning %>%
+  tidyr::nest( -radiance ) %>%
+  dplyr::mutate(
+    mapped = purrr::map( data, loess, formula = firing_rate ~ wavelength, span = 0.5 ),
+    fitted = purrr::map( mapped, `[[`,"fitted" )
+  )
+#fitted values for each loess prediction as a column
+loess_smooth_res <- loess_smooth_vals %>%
+  dplyr::select( -mapped ) %>%
+  tidyr::unnest()
+#find the max values for each radiance group
+loess_smooth_max <- loess_smooth_res %>%
+  dplyr::group_by( radiance, cell_type ) %>%
+  dplyr::slice( which.max( fitted ) ) %>%
+  arrange( radiance, cell_type )
+
+loess_smooth_max
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;Visualize information about the peak spectral tuning
+```{r}
+p1 <- ggplot( loess_smooth_max, aes( x = radiance, y = firing_rate ) ) +
+  geom_point() +
+  geom_line() +
+  ylab( "mean firing rate (spikes/sec)" ) +
+  theme_classic() +
+  facet_wrap( ~ cell_type )
+p2 <- ggplot( loess_smooth_max, aes( y = wavelength, x = cell_type ) ) +
+  geom_jitter(width = 0.1) +
+  theme_classic() +
+  ggtitle( "Spectral Tuning by LGN cell type")
+
 grid.arrange( p1, p2, ncol = 2 )
 ```
 
+&nbsp;&nbsp;&nbsp;&nbsp;From the figure above, we can see that the mean firing rate of both neurons decreases with the radiance of the stimulus (left panel). The right panel visualizes the spectral tuning, or the wavelength where the LGN neurons firing rate is the highest. Next, let's use the results of a t-test to determine if there is a significant difference in the mean spectral tuning of the two neurons
+```{r}
+spectun_ttest <- t.test( wavelength ~ cell_type, data = loess_smooth_max, var.equal = T )
+spectun_ttest
+```
+
+&nbsp;&nbsp;&nbsp;&nbsp;It is clear that we can reject the null hypothesis that the means come from the same distribution (t= `r spectun_ttest$statistic`, p-val = `r spectun_ttest$p.value`); this supports the hypothesis that the spectral tuning of the two LGN neurons we examined here have significantly different means.
+
+## Conclusions
+&nbsp;&nbsp;&nbsp;&nbsp;In a previous post, we looked at data that demonstrated the differences in RF size between classes of RGC neurons. In this post, we explored the differences in spectral tuning of LGN neurons. The differences in cell classes is important, because this supports the theory of parallel processing in early visual signal processing. Parallel processing refers to the idea that different classes of neurons with distinct response properties form separate pathways for information to flow from the eye to the brain. In this early paper, De Valois, Abramov & Jacobs demonstrated the LGN neurons can be categorized by their responses to modulation of chromatic stimuli. Some LGN neurons did not appear to be spectrally opponant, rather, these cells were either excited or inhibited by light (of any wavelength). Other LGN neurons demonstrated spectral opponancy: they were excited by some wavelengths of light, but inhibited by other wavelengths. De Valois *et al* further classified these cells as either being excited by relatively long wavelength light or relatively short wavelength light. In this post we visualized the responses of two spectally opponant cells, one with long wavelength opponancy (+Y-B) and the other with short wavelength opponancy (+G-R). It should be noted that De Valois *et al* performed this study in 1965. A lot has been learned about the visual system since then! While the LGN classifications presented here are not used in current literature, the principle of their finding has had an impact. In future posts, we can explore more current classifications of RGC and LGN cell classes.   
+<br><br><br>
